@@ -608,7 +608,6 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, re
     loss_pos = rew_coeff["pos"] * (
     rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
     # loss_pos = dist
-    flag = 1
     if dist < TOL:
         flag = 0
 
@@ -787,6 +786,8 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         ## Statistics vars
         self.traj_count = 0
+
+        print(self.obs_repr)
 
         ###############################################################################
         ## DYNAMICS (and randomization)
@@ -1164,6 +1165,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         )
         err_pos = pos - self.goal[:3]
 
+        global flag
         if np.linalg.norm(err_pos) < TOL:
             flag = 0
 
@@ -2449,6 +2451,8 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, re
     loss_pos = rew_coeff["pos"] * (
     rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
     # loss_pos = dist
+
+    global flag
     if dist < TOL:
         flag = 0
 
