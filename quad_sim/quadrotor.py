@@ -2456,6 +2456,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, re
     if dist < TOL:
         flag = 0
 
+    loss_pos *= flag
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
 
