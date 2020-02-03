@@ -720,7 +720,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                  dynamics_randomization_ratio_params=None,
                  raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200.,
                  sim_steps=2,
-                 obs_repr="xyz_vxyz_rot_omega_flag", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
+                 obs_repr="xyz_vxyz_rot_omega_reached", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
                  rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False):
         np.seterr(under='ignore')
         """
@@ -1149,7 +1149,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         return np.concatenate([pos - self.goal[:3], vel, euler, omega])
 
     @staticmethod
-    def state_xyz_vxyz_rot_omega_flag(self):
+    def state_xyz_vxyz_rot_omega_reached(self):
         pos, vel, rot, omega, acc = self.sense_noise.add_noise(
             pos=self.dynamics.pos,
             vel=self.dynamics.vel,
@@ -1158,16 +1158,15 @@ class QuadrotorEnv(gym.Env, Serializable):
             acc=self.dynamics.accelerometer,
             dt=self.dt
         )
-        err_pos = pos - self.goal[:3]
 
         return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, [int(self.reached)]])
 
     def get_observation_space(self):
         self.wall_offset = 0.3
 
-        if self.obs_repr == 'xyz_vxyz_rot_omega_flag':
+        if self.obs_repr == 'xyz_vxyz_rot_omega_reached':
             self.obs_comp_sizes = [3, 3, 9, 3, 1]
-            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "flag"]
+            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "reached"]
             obs_dim = np.sum(self.obs_comp_sizes)
             obs_high = np.ones(obs_dim)
             obs_low = -np.ones(obs_dim)
@@ -1187,7 +1186,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
             obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
 
-            # flag
+            # reached
             obs_high[18] = 1
             obs_low[18] = 0
 
