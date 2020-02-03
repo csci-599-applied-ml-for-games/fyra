@@ -1436,7 +1436,8 @@ class QuadrotorEnv(gym.Env, Serializable):
                                                                   a_min=self.room_box[0],
                                                                   a_max=self.room_box[1]))
 
-        self.reached = np.linalg.norm(self.dynamics.pos - self.goal) < GOAL_TOLERANCE
+        if not self.reached:
+            self.reached = np.linalg.norm(self.dynamics.pos - self.goal) < GOAL_TOLERANCE
 
         self.time_remain = self.ep_len - self.tick
         reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed,
