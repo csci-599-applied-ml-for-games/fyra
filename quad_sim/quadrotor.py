@@ -869,9 +869,6 @@ class QuadrotorEnv(gym.Env, Serializable):
         ## Updating dynamics
         dyn_upd_start_time = time.time()
         self.update_dynamics(dynamics_params=self.dynamics_params)
-        print("------------------------------")
-        print("### OBS_REPR ###", self.obs_repr)
-        print("------------------------------")
         print("QuadEnv: Dyn update time: ", time.time() - dyn_upd_start_time)
 
         ###############################################################################

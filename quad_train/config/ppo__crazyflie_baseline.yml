@@ -22,7 +22,7 @@ variant:
       spin: 0.
       vel: 0.0
       crash: 1.
-      orient: 0.
+      orient: 1.
       yaw: 0. 
   alg_class: PPO
   alg_param:
