@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 GRAV = 9.81  # default gravitational constant
 EPS = 1e-6  # small constant to avoid divisions by 0 and log(0)
-GOAL_TOLERANCE = 0.05
+GOAL_TOLERANCE = 0.1
 
 
 ## WARN:
@@ -690,7 +690,8 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
         # "rew_spin_z": -loss_spin_z,
         # "rew_spin_xy": -loss_spin_xy,
         # "rew_act_change": -loss_act_change,
-        "rew_vel": -loss_vel
+        "rew_vel": -loss_vel,
+        "rew_reached": reached
     }
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
@@ -894,6 +895,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.tick = 0
         self.crashed = False
         self.control_freq = sim_freq / sim_steps
+        self.reached = False
 
         #########################################
         ## REWARDS PARAMS
@@ -1437,7 +1439,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                                                                   a_max=self.room_box[1]))
 
         if not self.reached:
-            self.reached = np.linalg.norm(self.dynamics.pos - self.goal) < GOAL_TOLERANCE
+            self.reached = np.linalg.norm(self.dynamics.pos - self.goal) <= GOAL_TOLERANCE
 
         self.time_remain = self.ep_len - self.tick
         reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed,
