@@ -604,6 +604,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
     ##################################################
     ## log to create a sharp peak at the goal
     dist = np.linalg.norm(goal - dynamics.pos)
+    # TODO: add in new goal here if distance is less than a certain threshold?
     loss_pos = rew_coeff["pos"] * (
     rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
     # loss_pos = dist
@@ -1437,6 +1438,10 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         if not self.reached:
             self.reached = np.linalg.norm(self.dynamics.pos - self.goal[:3]) <= GOAL_TOLERANCE
+        
+        if self.reached:
+            self.goal = sample_goal()
+            self.reached = False
 
         self.time_remain = self.ep_len - self.tick
         reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed,
@@ -1773,6 +1778,10 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
     if plot_step is not None or plot_dyn_change:
         plt.show(block=False)
         input("Press Enter to continue...")
+
+# TODO: is this right?
+def sample_goal():
+    return np.array([0., 0., np.random.uniform(0.5, 2.0)])
 
 
 def main(argv):
