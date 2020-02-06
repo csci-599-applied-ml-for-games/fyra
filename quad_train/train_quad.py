@@ -3,9 +3,14 @@
 This is a parametrized script to run TRPO/PPO 
 with a custom env
 """
+import os
+
+os.environ["OMP_NUM_THREADS"]="3"
+os.environ["KMP_AFFINITY"]="none"
+
 import argparse
 import sys
-import os
+
 import datetime, time
 import itertools
 import os.path as osp
