@@ -675,7 +675,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
         # loss_spin_xy,
         loss_act_change,
         loss_vel
-        ]) # - int(reached) * 0.1 * dist
+        ]) # - int(reached) * 0.1/dist
 
     rew_info = {
         "rew_main": -loss_pos,
