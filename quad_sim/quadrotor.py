@@ -662,7 +662,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
     # reward = -dt * np.sum([loss_pos, loss_effort, loss_alt, loss_vel_proj, loss_crash])
     # rew_info = {'rew_crash': -loss_crash, 'rew_altitude': -loss_alt, 'rew_action': -loss_effort, 'rew_pos': -loss_pos, 'rew_vel_proj': -loss_vel_proj}
 
-    reward = -dt * int(not reached) * np.sum([
+    reward = -dt * int( not reached) * np.sum([
         loss_pos,
         loss_effort,
         loss_crash,
@@ -675,7 +675,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
         # loss_spin_xy,
         loss_act_change,
         loss_vel
-    ])
+        ]) # - int(reached) * 0.1/dist
 
     rew_info = {
         "rew_main": -loss_pos,
