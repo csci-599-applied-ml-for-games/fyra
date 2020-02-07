@@ -1440,7 +1440,9 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.reached = np.linalg.norm(self.dynamics.pos - self.goal[:3]) <= GOAL_TOLERANCE
         
         if self.reached:
+            print("====== changing goal ======")
             self.goal = sample_goal()
+            print(self.goal)
             self.reached = False
 
         self.time_remain = self.ep_len - self.tick
@@ -1781,7 +1783,7 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
 
 # TODO: is this right?
 def sample_goal():
-    return np.array([0., 0., np.random.uniform(0.5, 2.0)])
+    return np.array([0., 0., np.random.uniform(0.5, 10.0)])
 
 
 def main(argv):
