@@ -1784,7 +1784,8 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
 
 # TODO: is this right?
 def sample_goal():
-    return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
+    return np.array([0., 0., np.random.uniform(0.5, 10.0)])
+    #return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
 
 
 def main(argv):
