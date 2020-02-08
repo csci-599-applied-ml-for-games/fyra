@@ -31,7 +31,7 @@ def test_rollout(
     if traj_file != None:
         print("Reading trajectory...")
         traj = np.loadtxt(traj_file, delimiter=',')
-        traj_freq = 1 ## every 1 time step(s), the goal is set to the next point in the traj
+        # traj_freq = 1 ## every 1 time step(s), the goal is set to the next point in the traj
 
     import tensorflow as tf
     with tf.Session() as sess:
@@ -100,9 +100,18 @@ def test_rollout(
 
                 if traj_file != None:
                     if traj_ptr < traj.shape[0]:
-                        if t % traj_freq == 0:
+                        # if t % traj_freq == 0:
+                        #    env.goal = traj[traj_ptr][:3]
+                        #    traj_ptr += 5   ## need to adjust this parameter according to the trajectory file frequency
+
+                        state = env.state_vector(env)
+                        reached = state[-1]
+
+                        if reached:
+                            # update goal
                             env.goal = traj[traj_ptr][:3]
-                            traj_ptr += 5   ## need to adjust this parameter according to the trajectory file frequency
+                            traj_ptr += 1
+
                         action = policy.get_action(s)[1]['mean']
                         s, r, _, info = env.step(action)
                     else:
