@@ -19,7 +19,7 @@ variant:
       pos_log_weight: 0.
       pos_linear_weight: 1.
       effort: 0.05
-      spin: 0.1
+      spin: 0.
       vel: 0.0
       crash: 1. 
       orient: 0.
