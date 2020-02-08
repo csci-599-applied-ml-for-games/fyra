@@ -5,7 +5,7 @@ with a custom env
 """
 import os
 
-os.environ["OMP_NUM_THREADS"]="3"
+os.environ["OMP_NUM_THREADS"]="6"
 os.environ["KMP_AFFINITY"]="none"
 
 import argparse
@@ -38,7 +38,7 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 parser.add_argument("config_file", help='yaml file with default settings of parameters')
 parser.add_argument("log_dir", default='_results_temp/trpo_ppo_last', help='Directory to log into')
 parser.add_argument("--seed", '-s', default="1", help='list of seeds to use separated by comma (or a single seed w/o comma). If None seeds from config_file will be used')
-parser.add_argument("--n_parallel", '-n', type=int, default=1, help='Number of parallel workers to run a single task')
+parser.add_argument("--n_parallel", '-n', type=int, default=4, help='Number of parallel workers to run a single task')
 parser.add_argument("--snapshot_mode", '-snm', default='last', help='Snapshot mode. Opt: last')
 parser.add_argument("--plot", '-plt', action="store_true", help='Plotting')
 parser.add_argument("--param_name", '-p', help='task hyperparameter names separated by comma')

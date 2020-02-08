@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 GRAV = 9.81  # default gravitational constant
 EPS = 1e-6  # small constant to avoid divisions by 0 and log(0)
-GOAL_TOLERANCE = 0.1
+GOAL_TOLERANCE = 0.01
 
 
 ## WARN:
@@ -1447,6 +1447,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         if self.reached:
             print("====== changing goal ======")
             self.goal = sample_goal()
+            self.scene.update_state(self.dynamics, self.goal)
             print(self.goal)
             self.reached = False
         
