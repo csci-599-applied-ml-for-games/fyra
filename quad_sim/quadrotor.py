@@ -173,7 +173,6 @@ class QuadrotorDynamics(object):
         self.thrust_noise_ratio = self.model_params["noise"]["thrust_noise_ratio"]
         self.vel_damp = self.model_params["damp"]["vel"]
         self.damp_omega_quadratic = self.model_params["damp"]["omega_quadratic"]
-
         ###############################################################
         ## COMPUTED (Dependent) PARAMETERS
         try:
@@ -723,7 +722,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                  raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200.,
                  sim_steps=2,
                  obs_repr="xyz_vxyz_rot_omega_reached", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
-                 rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False):
+                 rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 1, goals = [], num_vis_goals = 1):
         np.seterr(under='ignore')
         """
         Args:
@@ -871,6 +870,24 @@ class QuadrotorEnv(gym.Env, Serializable):
         dyn_upd_start_time = time.time()
         self.update_dynamics(dynamics_params=self.dynamics_params)
         print("QuadEnv: Dyn update time: ", time.time() - dyn_upd_start_time)
+
+        # number of goals we'll add to the observations
+        self.num_vis_goals = num_vis_goals
+        # number of goals in trajectory
+        self.num_goals = num_goals
+
+        # no goals passed in
+        self.goals = np.asarray(goals)
+        if self.goals.size == 0:
+            # make a 2d array of goal states
+            self.goals = np.empty([self.num_goals, 3], dtype=np.float64)
+        
+        # sample more goals if not enough have been passed in
+        for i in range(num_goals - self.goals.size):
+            #TODO: fix array type
+            self.goals[i] = sample_goal()
+        print("======== goals =========")
+        print(self.goals)
 
         ###############################################################################
         ## OBSERVATIONS
@@ -1189,6 +1206,8 @@ class QuadrotorEnv(gym.Env, Serializable):
             # reached
             obs_high[18] = 1
             obs_low[18] = 0
+
+        #TODO: add in new obs_rep?
 
         if self.obs_repr == "xyz_vxyz_rot_omega" or self.obs_repr == "xyzr_vxyzr_rot_omega":
             ## Creating observation space
