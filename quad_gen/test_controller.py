@@ -1,6 +1,6 @@
-from gym_art.quadrotor.quad_utils import R2quat
-from gym_art.quadrotor.quad_models import *
-from gym_art.quadrotor.quadrotor_randomization import *
+from quad_sim.quad_utils import R2quat
+from quad_sim.quad_models import *
+from quad_sim.quadrotor_randomization import *
 from simulators_investigation.utils import *
 import sys
 import argparse
