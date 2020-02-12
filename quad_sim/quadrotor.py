@@ -723,7 +723,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                  sim_steps=2,
                  obs_repr="xyz_vxyz_rot_omega_reached", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
                  rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 1, goals = [], 
-                 num_vis_goals = 1, point_distance=0.5):
+                 point_distance=0.5):
         np.seterr(under='ignore')
         """
         Args:
@@ -756,8 +756,14 @@ class QuadrotorEnv(gym.Env, Serializable):
         # if first character of obs rep is a number, use the number to set number of visible states
         print("+++++++ obs repr +++++++++")
         print(obs_repr[0].isdigit())
+        
         if obs_repr[0].isdigit():
             self.num_vis_goals = int(obs_repr[0])
+        else:
+            self.num_vis_goals = 1
+
+        self.flags = np.zeros([self.num_vis_goals])
+
         print(self.num_vis_goals)
         self.obs_repr = obs_repr
         self.sim_steps = sim_steps
@@ -772,6 +778,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.update_sense_noise(sense_noise=sense_noise)
         self.gravity = gravity
         self.resample_goal = resample_goal
+        self.curr_goal = 0
 
         ## PARAMS
         self.max_init_vel = 1.  # m/s
@@ -886,8 +893,6 @@ class QuadrotorEnv(gym.Env, Serializable):
         # distance between random points; ensures points on a trajectory are equidistant
         self.point_distance = point_distance
 
-        # number of goals we'll add to the observations
-        self.num_vis_goals = num_vis_goals
         # number of goals in trajectory
         self.num_goals = num_goals
 
@@ -899,12 +904,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             # make a 2d array of goal states
             print("\nWARNING: num_goals > goals provided. Randomly sampling goals.\n")
             self.goals = np.empty([self.num_goals, 3], dtype=np.float32)
-            
-            prev_goal = np.array([np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0)])
-
-            for i in range(self.num_goals):
-                self.goals[i] = sample_goal(prev_goal)
-                prev_goal = self.goals[i]
+            self.sample_goals() 
 
         # sample more goals if not enough have been passed in
         # print(self.goals.shape)
@@ -970,6 +970,13 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         # Always call Serializable constructor last
         Serializable.quick_init(self, locals())
+
+    def sample_goals(self):
+        prev_goal = np.array([np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0)])
+
+            for i in range(self.num_goals):
+                self.goals[i] = self.sample_goal(prev_goal)
+                prev_goal = self.goals[i]
 
     def save_dyn_params(self, filename):
         import yaml
@@ -1222,17 +1229,59 @@ class QuadrotorEnv(gym.Env, Serializable):
         for i in range(self.num_vis_goals):
             # TODO: need to keep track of which goals we're looking at
             state[i] = pos - self.goals[i][:3]
-            
-        state = np.concatenate((state.flatten(), vel, rot.flatten()))
-        flags = np.empty([self.num_vis_goals])
-        state = np.concatenate((state, omega, flags))
+        
+        state = np.concatenate([state.flatten(), vel, rot.flatten(), omega, self.flags])
 
         return state
 
     def get_observation_space(self):
         self.wall_offset = 0.3
 
-        if self.obs_repr == 'xyz_vxyz_rot_omega_reached':
+        # if the first character is the number of visible points
+        # keep this first, otherwise next if statement will eval to true even if using multiple points
+        #TODO: assuming that we're also using reached flags right now
+
+        if self.obs_repr[0].isdigit():
+            # each visible point/goal will have 3 values
+            self.obs_comp_sizes = [3 for i in range(self.num_vis_goals)]
+            # velocity, rotation and omega
+            self.obs_comp_sizes.extend([3, 9, 3])
+            # 1d flag for each visible point
+            self.obs_comp_sizes.extend([1 for i in range(self.num_vis_goals)])
+
+            self.obs_comp_names = ["xyz" for i in range(self.num_vis_goals)]
+            self.obs_comp_names.extend(["Vxyz", "R", "Omega"])
+            # flag for each visible point
+            self.obs_comp_names.extend(["reached" + str(i) for i in range(self.num_vis_goals)])
+
+            obs_dim = np.sum(self.obs_comp_sizes)
+            obs_high = np.ones(obs_dim)
+            obs_low = -np.ones(obs_dim)
+
+            # xyz room constraints
+            for i in range(self.num_vis_goals):
+                obs_high[i*3: i*3 + 3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
+                obs_low[i*3: i*3 + 3] = -obs_high[0:3]
+
+            # Vxyz
+            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
+            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
+
+            # R
+            # indx range: 6:15
+
+            # Omega
+            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
+            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
+
+            # reached
+            # at the end of the array, put in the flags
+            for i in range(18, 18 + self.num_vis_goals):
+                obs_high[i] = 1
+                obs_low[i] = 0
+
+
+        elif self.obs_repr == 'xyz_vxyz_rot_omega_reached':
             self.obs_comp_sizes = [3, 3, 9, 3, 1]
             self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "reached"]
             obs_dim = np.sum(self.obs_comp_sizes)
@@ -1258,48 +1307,8 @@ class QuadrotorEnv(gym.Env, Serializable):
             obs_high[18] = 1
             obs_low[18] = 0
 
-        # if the first character is the number of visible points
-        #TODO: assuming that we're also using reached flags right now
-        if self.obs_repr[0].isdigit():
-            # each visible point/goal will have 3 values
-            self.obs_comp_sizes = [3 for i in range(self.num_vis_goals)]
-            # velocity, rotation and omega
-            self.obs_comp_sizes.extend([3, 9, 3])
-            # 1d flag for each visible point
-            self.obs_comp_sizes.extend([1 for i in range(self.num_vis_goals)])
 
-            self.obs_comp_names = ["xyz" for i in range(self.num_vis_goals)]
-            self.obs_comp_names.extend(["Vxyz", "R", "Omega"])
-            # flag for each visible point
-            self.obs_comp_names.extend(["reached" + str(i) for i in range(self.num_vis_goals)])
-
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            for i in range(self.num_vis_goals):
-                obs_high[i: i + 3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-                obs_low[i: i + 3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # reached
-            # at the end of the array, put in the flags
-            for i in range(18, 18 + self.num_vis_goals):
-                obs_high[i] = 1
-                obs_low[i] = 0
-
-        if self.obs_repr == "xyz_vxyz_rot_omega" or self.obs_repr == "xyzr_vxyzr_rot_omega":
+        elif self.obs_repr == "xyz_vxyz_rot_omega" or self.obs_repr == "xyzr_vxyzr_rot_omega":
             ## Creating observation space
             # pos, vel, rot, rot vel
             self.obs_comp_sizes = [3, 3, 9, 3]
@@ -1357,7 +1366,7 @@ class QuadrotorEnv(gym.Env, Serializable):
 
             # h - distance to ground
             obs_high[-1] = self.room_box[1][2]
-            obs_low[-1] = self.[room_box][0][2]
+            obs_low[-1] = self.room_box[0][2]
 
         elif self.obs_repr == "xyz_vxyz_rot_omega_acc_act":
             ## Creating observation space
@@ -1544,16 +1553,27 @@ class QuadrotorEnv(gym.Env, Serializable):
                                                           np.clip(self.dynamics.pos,
                                                                   a_min=self.room_box[0],
                                                                   a_max=self.room_box[1]))
+        
+        ## multiple points
 
-        if not self.reached:
+        if self.num_vis_goals > 1 and not self.flags[self.curr_goal]:
+            self.flags[self.curr_goal] = np.linalg.norm(self.dynamics.pos - self.goals[self.curr_goal : 3*self.curr_goal]) <= GOAL_TOLERANCE
+
+            if self.flags[self.curr_goal]:
+                self.curr_goal += 1
+
+
+        # one point at a time
+
+        elif not self.reached:
             self.reached = np.linalg.norm(self.dynamics.pos - self.goal[:3]) <= GOAL_TOLERANCE
 
         self.time_remain = self.ep_len - self.tick
         reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed,
                                                    self.reached, self.time_remain,
-                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1])
+                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1], self.flags)
         
-        if self.reached:
+        if self.reached and self.num_vis_goals <= 1:
             print("====== changing goal ======")
             self.goal = sample_goal(self.goal)
             self.scene.update_state(self.dynamics, self.goal)
@@ -1612,6 +1632,12 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
         else:
             self.goal = np.array([0., 0., 2.])
+
+        if self.num_vis_goals > 1:
+            self.sample_goals()
+            self.flags = np.zeros([self.num_vis_goals])
+        
+        self.curr_goal = 0
 
         ## CURRICULUM (NOT REALLY NEEDED ANYMORE)
         # from 0.5 to 10 after 100k episodes (a form of curriculum)
@@ -1681,6 +1707,39 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         state = self.state_vector(self)
         return state
+
+    def sample_goal(self, prev_point):
+        # R = (x - x0)^2 + (y - y0)^2 + (z - z0)^2
+        # z = +/- sqrt( R - (x-x0)^2 - (y-y0)^2 ) + z0
+
+        x0 = prev_point[0]
+        y0 = prev_point[1]
+        z0 = prev_point[2]
+
+        newX = np.random.uniform( max(self.room_box[0][0], x0 - self.point_distance), 
+                                    min(self.room_box[1][0], x0 + self.point_distance))
+
+        newY = np.random.uniform( max(self.room_box[0][1], y0 - self.point_distance),
+                                    min(self.room_box[1][1], y0 + self.point_distance))
+        
+        sq = self.point_distance - (newX - x0) ** (2) - (newY - y0) ** (2)
+        
+        assert(sq >= 0)
+        sq = np.sqrt(sq)
+
+        if z0 - sq < 0:
+            newZ = z0 + sq
+        else:
+            pickOne = np.random.choice([-1,1])
+            newZ = z0 + pickOne * sq
+
+        if newZ < self.room_box[0][2] or newZ >= self.room_box[1][2]:
+            return self.sample_goal(prev_point) # if we're out of room bounds, try again
+        
+        return np.array([newX, newY, newZ])
+
+    #return np.array([0., 0., np.random.uniform(0.5, 10.0)])
+    #return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
 
     def _render(self, mode='human', close=False):
         return self.scene.render_chase(dynamics=self.dynamics, goal=self.goal, mode=mode)
@@ -1892,38 +1951,6 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
         plt.show(block=False)
         input("Press Enter to continue...")
 
-# TODO: is this right?
-def sample_goal(prev_point):
-    self.room_size
-    # R = (x - x0)^2 + (y - y0)^2 + (z - z0)^2
-    # z = +/- sqrt( R - (x-x0)^2 - (y-y0)^2 ) + z0
-
-    x0 = prev_point[0]
-    y0 = prev_point[1]
-    z0 = prev_point[2]
-
-    newX = np.random.uniform( max(self.room_box[0][0], x0 - self.point_distance), 
-                                min(self.room_box[1][0], x0 + self.point_distance))
-
-    newY = np.random.uniform( max(self.room_box[0][1], y0 - self.point_distance),
-                                min(self.room_box[1][1], y0 + self.point_distance))
-    
-    sq = np.sqrt(self.point_distance - (newX - x0) ** (2) - (newY - y0) ** (2))
-    assert(sq >= 0)
-
-    if z0 - sq < 0:
-        newZ = z0 + sq
-    else:
-        pickOne = np.random.choice([-1,1])
-        newZ = z0 + pickOne * sq
-
-    if newZ < self.room_box[0][2] or newZ >= self.room_box[1][2]:
-        return sample_goal(prev_point) # if we're out of room bounds, try again
-    
-    return numpy.array([newX, newY, newZ])
-
-    #return np.array([0., 0., np.random.uniform(0.5, 10.0)])
-    #return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
 
 # the nubmer of visible points will be represented in a state by 
 # #xyz... where # is the number of points
