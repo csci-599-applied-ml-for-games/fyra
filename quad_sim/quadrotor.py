@@ -753,6 +753,12 @@ class QuadrotorEnv(gym.Env, Serializable):
         ## ARGS
         self.init_random_state = init_random_state
         self.room_size = room_size
+        # if first character of obs rep is a number, use the number to set number of visible states
+        print("+++++++ obs repr +++++++++")
+        print(obs_repr[0].isdigit())
+        if obs_repr[0].isdigit():
+            self.num_vis_goals = int(obs_repr[0])
+        print(self.num_vis_goals)
         self.obs_repr = obs_repr
         self.sim_steps = sim_steps
         self.dim_mode = dim_mode
@@ -776,7 +782,12 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         self.room_box = np.array(
             [[-self.room_size, -self.room_size, 0], [self.room_size, self.room_size, self.room_size]])
-        self.state_vector = getattr(self, "state_" + self.obs_repr)
+        if self.num_vis_goals > 0:
+            self.state_vector = getattr(self, "xstate_xyz_vxyz_rot_omega_reached")
+        else:
+            self.state_vector = getattr(self, "state_" + self.obs_repr)
+        print("STATE VECTOR")
+        print(self.state_vector)
         ## WARN: If you
         # size of the box from which initial position will be randomly sampled
         # if box_scale > 1.0 then it will also growevery episode
@@ -842,7 +853,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.dynamics_params = self.dyn_sampler()
         else:
             ## Setting the quad dynamics params
-            if isinstance(dynamics_params, str):
+            if isinstance(dynamics_params, str)        :
                 self.dynamics_params_def = globals()[dynamics_params + "_params"]()
             elif isinstance(dynamics_params, dict):
                 # This option is good when you only partially provide parameters of the model
@@ -882,14 +893,22 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         # no goals passed in
         self.goals = np.asarray(goals)
-        if self.goals.size == 0:
-            # make a 2d array of goal states
-            self.goals = np.empty([self.num_goals, 3], dtype=np.float64)
         
+        
+        if self.goals.size < self.num_goals:
+            # make a 2d array of goal states
+            print("\nWARNING: num_goals > goals provided. Randomly sampling goals.\n")
+            self.goals = np.empty([self.num_goals, 3], dtype=np.float32)
+            
+            prev_goal = np.array([np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0)])
+
+            for i in range(self.num_goals):
+                self.goals[i] = sample_goal(prev_goal)
+                prev_goal = self.goals[i]
+
         # sample more goals if not enough have been passed in
-        for i in range(num_goals - self.goals.size):
-            #TODO: fix array type
-            self.goals[i] = sample_goal()
+        # print(self.goals.shape)
+        
         print("======== goals =========")
         print(self.goals)
 
@@ -1018,7 +1037,11 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         ################################################################################
         ## STATE VECTOR FUNCTION
-        self.state_vector = getattr(self, "state_" + self.obs_repr)
+        # if we're using more than one point, just use this one state function
+        if self.num_vis_goals > 0:
+            self.state_vector = getattr(self, "xstate_xyz_vxyz_rot_omega_reached")
+        else:
+            self.state_vector = getattr(self, "state_" + self.obs_repr)
 
     ## NOTE: the state_* methods are static because otherwise getattr memorizes self
     @staticmethod
@@ -1182,6 +1205,31 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, [int(self.reached)]])
 
+    @staticmethod
+    def xstate_xyz_vxyz_rot_omega_reached(self):
+        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
+            pos=self.dynamics.pos,
+            vel=self.dynamics.vel,
+            rot=self.dynamics.rot,
+            omega=self.dynamics.omega,
+            acc=self.dynamics.accelerometer,
+            dt=self.dt
+        )
+
+        # add num_vis_goals number of distances and flags into array
+        state = np.empty([3 * self.num_vis_goals], dtype=np.float32)
+        for i in range(self.num_vis_goals):
+            # TODO: need to keep track of which goals we're looking at
+            diff = pos - self.goals[i][:3]
+            state[i] = diff[0]
+            state[i + 1] = diff[1]
+            state[i + 2] = diff[2]
+        state = np.concatenate((state, vel, rot.flatten()))
+        flags = np.empty([self.num_vis_goals])
+        state = np.concatenate((state, omega, flags))
+
+        return state
+
     def get_observation_space(self):
         self.wall_offset = 0.3
 
@@ -1211,7 +1259,46 @@ class QuadrotorEnv(gym.Env, Serializable):
             obs_high[18] = 1
             obs_low[18] = 0
 
-        #TODO: add in new obs_rep?
+        # if the first character is the number of visible points
+        #TODO: assuming that we're also using reached flags right now
+        if self.obs_repr[0].isdigit():
+            # each visible point/goal will have 3 values
+            self.obs_comp_sizes = [3 for i in range(self.num_vis_goals)]
+            # velocity, rotation and omega
+            self.obs_comp_sizes.extend([3, 9, 3])
+            # 1d flag for each visible point
+            self.obs_comp_sizes.extend([1 for i in range(self.num_vis_goals)])
+
+            self.obs_comp_names = ["xyz" for i in range(self.num_vis_goals)]
+            self.obs_comp_names.extend(["Vxyz", "R", "Omega"])
+            # flag for each visible point
+            self.obs_comp_names.extend(["reached" + str(i) for i in range(self.num_vis_goals)])
+
+            obs_dim = np.sum(self.obs_comp_sizes)
+            obs_high = np.ones(obs_dim)
+            obs_low = -np.ones(obs_dim)
+
+            # xyz room constraints
+            for i in range(self.num_vis_goals):
+                obs_high[i: i + 3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
+                obs_low[i: i + 3] = -obs_high[0:3]
+
+            # Vxyz
+            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
+            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
+
+            # R
+            # indx range: 6:15
+
+            # Omega
+            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
+            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
+
+            # reached
+            # at the end of the array, put in the flags
+            for i in range(18, 18 + self.num_vis_goals):
+                obs_high[i] = 1
+                obs_low[i] = 0
 
         if self.obs_repr == "xyz_vxyz_rot_omega" or self.obs_repr == "xyzr_vxyzr_rot_omega":
             ## Creating observation space
@@ -1469,7 +1556,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         
         if self.reached:
             print("====== changing goal ======")
-            self.goal = sample_goal()
+            self.goal = sample_goal(self.goal)
             self.scene.update_state(self.dynamics, self.goal)
             print(self.goal)
             self.reached = False
@@ -1839,6 +1926,10 @@ def sample_goal(prev_point):
     #return np.array([0., 0., np.random.uniform(0.5, 10.0)])
     #return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
 
+# the nubmer of visible points will be represented in a state by 
+# #xyz... where # is the number of points
+def get_num_visible_points(obs_rep_input):
+    return int(obs_rep_input[0])
 
 def main(argv):
     # parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)

@@ -2,6 +2,7 @@ seed: 1
 variant:
   env: QuadrotorEnv
   env_param:
+    obs_repr : "3xyz_vxyz_rot_omega_reached"
     dynamics_params: crazyflie
     dynamics_change:
       noise:
