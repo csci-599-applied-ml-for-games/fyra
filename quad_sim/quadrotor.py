@@ -1571,7 +1571,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.time_remain = self.ep_len - self.tick
         reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed,
                                                    self.reached, self.time_remain,
-                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1], self.flags)
+                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1])
         
         if self.reached and self.num_vis_goals <= 1:
             print("====== changing goal ======")
