@@ -722,7 +722,8 @@ class QuadrotorEnv(gym.Env, Serializable):
                  raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200.,
                  sim_steps=2,
                  obs_repr="xyz_vxyz_rot_omega_reached", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
-                 rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 1, goals = [], num_vis_goals = 1):
+                 rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 1, goals = [], 
+                 num_vis_goals = 1, point_distance=0.5):
         np.seterr(under='ignore')
         """
         Args:
@@ -870,6 +871,9 @@ class QuadrotorEnv(gym.Env, Serializable):
         dyn_upd_start_time = time.time()
         self.update_dynamics(dynamics_params=self.dynamics_params)
         print("QuadEnv: Dyn update time: ", time.time() - dyn_upd_start_time)
+
+        # distance between random points; ensures points on a trajectory are equidistant
+        self.point_distance = point_distance
 
         # number of goals we'll add to the observations
         self.num_vis_goals = num_vis_goals
@@ -1267,7 +1271,7 @@ class QuadrotorEnv(gym.Env, Serializable):
 
             # h - distance to ground
             obs_high[-1] = self.room_box[1][2]
-            obs_low[-1] = self.room_box[0][2]
+            obs_low[-1] = self.[room_box][0][2]
 
         elif self.obs_repr == "xyz_vxyz_rot_omega_acc_act":
             ## Creating observation space
@@ -1803,8 +1807,36 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
         input("Press Enter to continue...")
 
 # TODO: is this right?
-def sample_goal():
-    return np.array([0., 0., np.random.uniform(0.5, 10.0)])
+def sample_goal(prev_point):
+    self.room_size
+    # R = (x - x0)^2 + (y - y0)^2 + (z - z0)^2
+    # z = +/- sqrt( R - (x-x0)^2 - (y-y0)^2 ) + z0
+
+    x0 = prev_point[0]
+    y0 = prev_point[1]
+    z0 = prev_point[2]
+
+    newX = np.random.uniform( max(self.room_box[0][0], x0 - self.point_distance), 
+                                min(self.room_box[1][0], x0 + self.point_distance))
+
+    newY = np.random.uniform( max(self.room_box[0][1], y0 - self.point_distance),
+                                min(self.room_box[1][1], y0 + self.point_distance))
+    
+    sq = np.sqrt(self.point_distance - (newX - x0) ** (2) - (newY - y0) ** (2))
+    assert(sq >= 0)
+
+    if z0 - sq < 0:
+        newZ = z0 + sq
+    else:
+        pickOne = np.random.choice([-1,1])
+        newZ = z0 + pickOne * sq
+
+    if newZ < self.room_box[0][2] or newZ >= self.room_box[1][2]:
+        return sample_goal(prev_point) # if we're out of room bounds, try again
+    
+    return numpy.array([newX, newY, newZ])
+
+    #return np.array([0., 0., np.random.uniform(0.5, 10.0)])
     #return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
 
 

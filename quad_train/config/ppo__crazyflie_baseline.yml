@@ -24,8 +24,9 @@ variant:
       crash: 1.
       orient: 1.
       yaw: 0. 
-    num_goals: 4
+    num_goals: 2
     num_vis_goals : 2 # number of goals to put in observations at each time
+    point_distance: 0.5
     # goals: [[]]
   alg_class: PPO
   alg_param:
