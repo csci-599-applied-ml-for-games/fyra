@@ -1217,14 +1217,13 @@ class QuadrotorEnv(gym.Env, Serializable):
         )
 
         # add num_vis_goals number of distances and flags into array
-        state = np.empty([3 * self.num_vis_goals], dtype=np.float32)
+        state = np.empty( [self.num_vis_goals, 3], dtype=np.float32)
+
         for i in range(self.num_vis_goals):
             # TODO: need to keep track of which goals we're looking at
-            diff = pos - self.goals[i][:3]
-            state[i] = diff[0]
-            state[i + 1] = diff[1]
-            state[i + 2] = diff[2]
-        state = np.concatenate((state, vel, rot.flatten()))
+            state[i] = pos - self.goals[i][:3]
+            
+        state = np.concatenate((state.flatten(), vel, rot.flatten()))
         flags = np.empty([self.num_vis_goals])
         state = np.concatenate((state, omega, flags))
 
