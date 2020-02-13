@@ -1244,7 +1244,7 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         for i in range(self.num_vis_goals):
             # TODO: need to keep track of which goals we're looking at
-            state[i] = pos - self.goals[i*3][:3]
+            state[i] = pos - self.goals[i]
         
         state = np.concatenate([state.flatten(), vel, rot.flatten(), omega, self.flags])
 
@@ -1573,7 +1573,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         ## multiple points
 
         if self.num_vis_goals > 1 and not self.flags[self.curr_goal]:
-            self.flags[self.curr_goal] = np.linalg.norm(self.dynamics.pos - self.goals[self.curr_goal*3 : 3*self.curr_goal + 3]) <= GOAL_TOLERANCE
+            self.flags[self.curr_goal] = np.linalg.norm(self.dynamics.pos - self.goals[self.curr_goal]) <= GOAL_TOLERANCE
         
         # one point at a time
 
