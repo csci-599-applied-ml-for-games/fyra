@@ -1259,16 +1259,16 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         if self.obs_repr[0].isdigit():
             # each visible point/goal will have 3 values
-            self.obs_comp_sizes = [3 for i in range(self.num_vis_goals)]
+            self.obs_comp_sizes = [3] * self.num_vis_goals
             # velocity, rotation and omega
             self.obs_comp_sizes.extend([3, 9, 3])
             # 1d flag for each visible point
-            self.obs_comp_sizes.extend([1 for i in range(self.num_vis_goals)])
+            self.obs_comp_sizes.extend([1] * self.num_vis_goals)
 
-            self.obs_comp_names = ["xyz" for i in range(self.num_vis_goals)]
+            self.obs_comp_names = ["xyz"] * self.num_vis_goals
             self.obs_comp_names.extend(["Vxyz", "R", "Omega"])
             # flag for each visible point
-            self.obs_comp_names.extend(["reached" + str(i) for i in range(self.num_vis_goals)])
+            self.obs_comp_names.extend(["reached"] * self.num_vis_goals)
 
             obs_dim = np.sum(self.obs_comp_sizes)
             obs_high = np.ones(obs_dim)
