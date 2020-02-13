@@ -62,6 +62,10 @@ GRAV = 9.81  # default gravitational constant
 EPS = 1e-6  # small constant to avoid divisions by 0 and log(0)
 GOAL_TOLERANCE = 0.01
 
+# set initial epsilon to infinity
+epsilon_0 = np.inf
+epsilon_1 = np.inf
+
 
 ## WARN:
 # - linearity is set to 1 always, by means of check_quad_param_limits().
@@ -599,15 +603,29 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
-def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_remain, rew_coeff, action_prev):
+def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, flags):
     ##################################################
     ## log to create a sharp peak at the goal
-    dist = np.linalg.norm(goal - dynamics.pos)
+    # dist = np.linalg.norm(goal - dynamics.pos)
     # TODO: add in new goal here if distance is less than a certain threshold?
-    loss_pos = rew_coeff["pos"] * (
-    rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
+    # loss_pos = rew_coeff["pos"] * (
+    # rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
     # loss_pos = dist
 
+    global epsilon_0
+    global epsilon_1
+
+    dist_0 = np.linalg.norm(goals[0] - dynamics.pos)
+    epsilon_0 = min(epsilon_0, dist_0)
+    loss_pos_0 = rew_coeff["pos"] * epsilon_0 * dist_0
+
+    dist_1 = np.linalg.norm(goals[1] - dynamics.pos)
+    epsilon_1 = min(epsilon_1, dist_1)
+    loss_pos_1 = flags[0] * rew_coeff["pos"] * epsilon_1 * dist_1
+
+    loss_pos = loss_pos_0 + loss_pos_1
+
+    #print("DIST_0: " + str(dist_0))
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
 
@@ -662,7 +680,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
     # reward = -dt * np.sum([loss_pos, loss_effort, loss_alt, loss_vel_proj, loss_crash])
     # rew_info = {'rew_crash': -loss_crash, 'rew_altitude': -loss_alt, 'rew_action': -loss_effort, 'rew_pos': -loss_pos, 'rew_vel_proj': -loss_vel_proj}
 
-    reward = -dt * int( not reached) * np.sum([
+    reward = -dt * np.sum([
         loss_pos,
         loss_effort,
         loss_crash,
@@ -675,7 +693,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
         # loss_spin_xy,
         loss_act_change,
         loss_vel
-        ]) # - int(reached) * 0.1/dist
+        ]) # + dt * np.sum(flags)
 
     rew_info = {
         "rew_main": -loss_pos,
@@ -691,7 +709,9 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
         # "rew_spin_xy": -loss_spin_xy,
         # "rew_act_change": -loss_act_change,
         "rew_vel": -loss_vel,
-        "rew_reached": reached
+        # "rew_reached": reached
+        "rew_reached_0": flags[0],
+        "rew_reached_1": flags[1]
     }
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
@@ -700,6 +720,8 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, reached, time_r
         for key, value in locals().items():
             print('%s: %s \n' % (key, str(value)))
         raise ValueError('QuadEnv: reward is Nan')
+
+    #print("REW: " + str(reward) + ", DIST_0: " + str(dist_0) + ", EPS_0: " + str(epsilon_0) + ", LOSS_0: " + str(loss_pos_0) + ", FLAGS: " + str(flags))
 
     return reward, rew_info
 
@@ -722,8 +744,8 @@ class QuadrotorEnv(gym.Env, Serializable):
                  raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200.,
                  sim_steps=2,
                  obs_repr="xyz_vxyz_rot_omega_reached", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
-                 rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 1, goals = [], 
-                 point_distance=0.5):
+                 rew_coeff=None, sense_noise=None, point_distance=0.5, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 2, num_vis_goals=2, goals = [], 
+    ):
         np.seterr(under='ignore')
         """
         Args:
@@ -754,17 +776,14 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.init_random_state = init_random_state
         self.room_size = room_size
         # if first character of obs rep is a number, use the number to set number of visible states
-        print("+++++++ obs repr +++++++++")
-        print(obs_repr[0].isdigit())
         
         if obs_repr[0].isdigit():
             self.num_vis_goals = int(obs_repr[0])
         else:
-            self.num_vis_goals = 1
+            self.num_vis_goals = num_vis_goals        
 
         self.flags = np.zeros([self.num_vis_goals])
 
-        print(self.num_vis_goals)
         self.obs_repr = obs_repr
         self.sim_steps = sim_steps
         self.dim_mode = dim_mode
@@ -793,8 +812,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.state_vector = getattr(self, "xstate_xyz_vxyz_rot_omega_reached")
         else:
             self.state_vector = getattr(self, "state_" + self.obs_repr)
-        print("STATE VECTOR")
-        print(self.state_vector)
+  
         ## WARN: If you
         # size of the box from which initial position will be randomly sampled
         # if box_scale > 1.0 then it will also growevery episode
@@ -902,7 +920,6 @@ class QuadrotorEnv(gym.Env, Serializable):
         
         if self.goals.size < self.num_goals:
             # make a 2d array of goal states
-            print("\nWARNING: num_goals > goals provided. Randomly sampling goals.\n")
             self.goals = np.empty([self.num_goals, 3], dtype=np.float32)
             self.sample_goals() 
 
@@ -972,11 +989,10 @@ class QuadrotorEnv(gym.Env, Serializable):
         Serializable.quick_init(self, locals())
 
     def sample_goals(self):
-        prev_goal = np.array([np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0)])
+        self.goals[0] = np.array([np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0)])
 
-            for i in range(self.num_goals):
-                self.goals[i] = self.sample_goal(prev_goal)
-                prev_goal = self.goals[i]
+        for i in range(1, self.num_goals):
+            self.goals[i] = self.sample_goal(self.goals[i-1])
 
     def save_dyn_params(self, filename):
         import yaml
@@ -1228,7 +1244,7 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         for i in range(self.num_vis_goals):
             # TODO: need to keep track of which goals we're looking at
-            state[i] = pos - self.goals[i][:3]
+            state[i] = pos - self.goals[i*3][:3]
         
         state = np.concatenate([state.flatten(), vel, rot.flatten(), omega, self.flags])
 
@@ -1557,26 +1573,30 @@ class QuadrotorEnv(gym.Env, Serializable):
         ## multiple points
 
         if self.num_vis_goals > 1 and not self.flags[self.curr_goal]:
-            self.flags[self.curr_goal] = np.linalg.norm(self.dynamics.pos - self.goals[self.curr_goal : 3*self.curr_goal]) <= GOAL_TOLERANCE
-
-            if self.flags[self.curr_goal]:
-                self.curr_goal += 1
-
-
+            self.flags[self.curr_goal] = np.linalg.norm(self.dynamics.pos - self.goals[self.curr_goal*3 : 3*self.curr_goal + 3]) <= GOAL_TOLERANCE
+        
         # one point at a time
 
-        elif not self.reached:
+        elif self.num_vis_goals <= 1 and not self.reached:
             self.reached = np.linalg.norm(self.dynamics.pos - self.goal[:3]) <= GOAL_TOLERANCE
 
         self.time_remain = self.ep_len - self.tick
-        reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed,
+        reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, self.goals, action, self.dt, self.crashed,
                                                    self.reached, self.time_remain,
-                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1])
+                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1],flags=self.flags)
+        
+        if self.flags[self.curr_goal] and self.curr_goal < self.num_goals:
+                print("====== changing goal ======")
+                self.curr_goal += 1
+                self.goal = self.goals[self.curr_goal]
+                self.scene.update_state(self.dynamics, self.goal)
+
+        # TODO: for now we're assuming num_goals = num_vis_goals. update this later for 
+        # when this isnt the case
         
         if self.reached and self.num_vis_goals <= 1:
-            print("====== changing goal ======")
+            print("reached = true")
             self.goal = sample_goal(self.goal)
-            self.scene.update_state(self.dynamics, self.goal)
             print(self.goal)
             self.reached = False
         
@@ -1628,14 +1648,22 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         ##############################################################
         ## GOAL
-        if self.resample_goal:
-            self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
-        else:
-            self.goal = np.array([0., 0., 2.])
-
+        # if self.resample_goal:
+        #     self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
+        # else:
+        #     self.goal = np.array([0., 0., 2.])
+        assert(self.num_vis_goals > 1)
+        
         if self.num_vis_goals > 1:
+            
+            epsilon_0 = np.inf
+            epsilon_1 = np.inf
+            
             self.sample_goals()
             self.flags = np.zeros([self.num_vis_goals])
+            self.goal = self.goals[0]
+
+        
         
         self.curr_goal = 0
 

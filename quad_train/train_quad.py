@@ -92,6 +92,7 @@ def run_task(task_param):
 
     if task_param["env"] == "QuadrotorEnv":
         from quad_sim.quadrotor import QuadrotorEnv
+        print(task_param)
         env = TfEnv(QuadrotorEnv(**task_param["env_param"]))
         del task_param["env_param"]
     else:

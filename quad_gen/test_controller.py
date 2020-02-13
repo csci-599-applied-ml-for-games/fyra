@@ -1,5 +1,6 @@
 from quad_sim.quad_utils import R2quat
 from quad_sim.quad_models import *
+from quad_sim.quadrotor import QuadrotorEnv
 from quad_sim.quadrotor_randomization import *
 from simulators_investigation.utils import *
 import sys
@@ -38,7 +39,9 @@ def test_rollout(
         print("extrating parameters from file %s ..." % param_file)
         params = joblib.load(param_file)
 
-        env = params['env'].env
+        #env = params['env'].env
+        target_goals = [[2., 1., 2.], [3, 2., 3.]]
+        env = QuadrotorEnv(num_goals=2,goals=target_goals)
         policy = params['policy']
         
         ## modify the environment
@@ -98,24 +101,22 @@ def test_rollout(
                 # =================================
                 if render and (t % render_each == 0): env.render()
 
-                if traj_file != None:
-                    if traj_ptr < traj.shape[0]:
-                        # if t % traj_freq == 0:
-                        #    env.goal = traj[traj_ptr][:3]
-                        #    traj_ptr += 5   ## need to adjust this parameter according to the trajectory file frequency
+                if traj_file != None or target_goals.size > 0:
+                # if traj_ptr < traj.shape[0]:
+                    # if t % traj_freq == 0:
+                    #    env.goal = traj[traj_ptr][:3]
+                    #    traj_ptr += 5   ## need to adjust this parameter according to the trajectory file frequency
+                    state = env.state_vector(env)
+                    reached = state[-1]
 
-                        state = env.state_vector(env)
-                        reached = state[-1]
-
-                        if reached:
-                            # update goal
-                            env.goal = traj[traj_ptr][:3]
-                            traj_ptr += 1
-
-                        action = policy.get_action(s)[1]['mean']
-                        s, r, _, info = env.step(action)
-                    else:
+                    if reached:
+                        # update goal
                         done = True
+
+                    action = policy.get_action(s)[1]['mean']
+                    s, r, _, info = env.step(action)
+                    # else:
+                    #     done = True
                 elif excite and t % 1000 == 0:
                     ## change the goal every 100 time step
                     env.goal = np.concatenate([
