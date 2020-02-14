@@ -1,13 +1,13 @@
-from quad_sim.quad_utils import R2quat
-from quad_sim.quad_models import *
-from quad_sim.quadrotor import QuadrotorEnv
-from quad_sim.quadrotor_randomization import *
-from simulators_investigation.utils import *
+# from quad_sim.quad_utils import R2quat
+# from quad_sim.quad_models import *
+# from quad_sim.quadrotor import QuadrotorEnv
+# from quad_sim.quadrotor_randomization import *
+# from simulators_investigation.utils import *
 import sys
 import argparse
-import matplotlib.pyplot as plt
-import numpy as np
-import joblib
+# import matplotlib.pyplot as plt
+# import numpy as np
+# import joblib
 import os
 import time
 
@@ -81,7 +81,7 @@ def test_rollout(
             policy.reset()
             
             ## reset the goal to x:0, y:0 z:0
-            env.goal = np.array([0., 0., 1])
+            # env.goal = np.array([0., 0., 1])
             
             dynamics = env.dynamics
             print("thrust to weight ratio set to: {}, and max thrust is {}".format(dynamics.thrust_to_weight, dynamics.thrust_max))
@@ -95,13 +95,13 @@ def test_rollout(
                  
 
             t = 0
-            traj_ptr = 0
+            traj = True
             done = False
             while True:
                 # =================================
                 if render and (t % render_each == 0): env.render()
 
-                if traj_file != None or len(target_goals) > 0:
+                if traj:
                 # if traj_ptr < traj.shape[0]:
                     # if t % traj_freq == 0:
                     #    env.goal = traj[traj_ptr][:3]
@@ -129,7 +129,7 @@ def test_rollout(
                     action = policy.get_action(s)[1]['mean']
                     s, r, done, info = env.step(action)
 
-                if done: break
+                if done: break  
                 t += 1
                 
                 # ========== Diagnostics ==========
