@@ -2,7 +2,9 @@ seed: 1
 variant:
   env: QuadrotorEnv
   env_param:
-    obs_repr : 2xyz_vxyz_rot_omega_reached"
+    obs_repr : nxyz_vxyz_R_omega_reached"
+    num_goals: 2
+    goal_dist: 0.5
     dynamics_params: crazyflie
     dynamics_change:
       noise:
@@ -15,7 +17,6 @@ variant:
     sim_steps: 2
     ep_time: 7
     sense_noise: default
-    point_distance: 0.5
     rew_coeff:
       pos: 1. 
       pos_log_weight: 0.
@@ -26,8 +27,6 @@ variant:
       crash: 1.
       orient: 1.
       yaw: 0. 
-    num_goals: 2
-    # goals: [[]]
   alg_class: PPO
   alg_param:
     batch_size: 28000

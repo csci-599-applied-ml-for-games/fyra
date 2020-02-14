@@ -5,6 +5,7 @@ from copy import deepcopy
 from quad_sim.quad_utils import *
 from quad_sim.quad_models import *
 
+
 def clip_params_positive(params):
     def clip_positive(key, item):
         return np.clip(item, a_min=0., a_max=None)
@@ -101,7 +102,43 @@ def perturb_dyn_parameters(params, noise_params, sampler="normal"):
 
     return params_new
 
-def sample_random_dyn():
+def resample_dyn_parameters(params, noise_params, sampler="uniform"):
+    """
+    The function resamples dynamics parameters
+    Args:
+        params (dict): dictionary of quadrotor parameters
+        noise_params (dict): dictionary of noise parameters with the same hierarchy as params, but
+            contains ratio of deviation from the params
+    Returns:
+        dict: modified parameters
+    """
+    ## Sampling parameters
+    def sample_normal(key, param_val, min_max):
+        #2*ratio since 2std contain 98% of all samples
+        mean = (min_max.min + min_max.max) / 2
+        std = (min_max.max - min_max.min) / 4 # i.e. 2 * stds contain 98% of samples
+        return np.random.normal(
+                loc=mean, scale=std
+            )
+    
+    def sample_uniform(key, param_val, min_max):
+        return np.random.uniform(
+            low=min_max.min * np.ones_like(param_val), 
+            high=min_max.max * np.ones_like(param_val)
+        )
+
+    sample_param = locals()["sample_" + sampler]
+
+    params_new = deepcopy(params)
+    walk_2dict(params_new, noise_params, sample_param)
+
+    ## Fixing a few parameters if they go out of allowed limits
+    params_new = check_quad_param_limits(params_new, params)
+
+    return params_new
+
+
+def randomquad_parameters():
     """
     The function samples parameters for all possible quadrotors
     Args:
@@ -204,77 +241,25 @@ def sample_random_dyn():
     params = check_quad_param_limits(params=params)
     return params
 
-def sample_random_dyn_nodelay():
-    params = sample_random_dyn()
+def sample_nodelay(params):
     params["motor"]["damp_time_up"] = 0.
     params["motor"]["damp_time_down"] = 0.
     return params
 
-def sample_random_thrust2weight_15_25():
-    params = sample_random_dyn()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=1.5, high=2.5)
-    # params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.8, high=2.8)
-    return params
-
-def sample_random_thrust2weight_15_35():
-    params = sample_random_dyn()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=1.5, high=3.5)
-    return params
-
-def sample_random_thrust2weight_20_30():
-    params = sample_random_dyn()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.0, high=3.0)
-    return params
-
-def sample_random_thrust2weight_20_40():
-    params = sample_random_dyn()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.0, high=4.0)
-    return params
-
-def sample_random_thrust2weight_20_50():
-    params = sample_random_dyn()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.0, high=5.0)
-    return params
-
-def sample_random_with_linearity():
-    params = sample_random_dyn()
+def sample_linearity(params):
     params["motor"]["linearity"] = np.random.uniform(low=0., high=1.)
     return params
 
-
-
-def sample_crazyflie_thrust2weight_18_25():
-    params = crazyflie_params()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=1.8, high=2.5)
+def sample_t2w(params, t2w_min, t2w_max):
+    params["motor"]["thrust_to_weight"] = np.random.uniform(low=t2w_min, high=t2w_max)
     return params
 
-def sample_crazyflie_thrust2weight_15_25():
-    params = crazyflie_params()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=1.5, high=2.5)
+def sample_t2w_t2t(params, t2w_min, t2w_max, t2t_min=0.003, t2t_max=0.009):
+    params["motor"]["thrust_to_weight"] = np.random.uniform(low=t2w_min, high=t2w_max)
+    params["motor"]["torque_to_thrust"] = np.random.uniform(low=t2t_min, high=t2t_max)
     return params
 
-def sample_crazyflie_thrust2weight_15_35():
-    params = crazyflie_params()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=1.5, high=3.5)
-    return params
-
-def sample_crazyflie_thrust2weight_20_30():
-    params = crazyflie_params()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.0, high=3.0)
-    return params
-
-def sample_crazyflie_thrust2weight_20_40():
-    params = crazyflie_params()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.0, high=4.0)
-    return params
-
-def sample_crazyflie_thrust2weight_20_50():
-    params = crazyflie_params()
-    params["motor"]["thrust_to_weight"] = np.random.uniform(low=2.0, high=5.0)
-    return params
-
-
-def sample_random_dyn_lowinertia():
+def sample_simplified_random_dyn():
     """
     The function samples parameters for all possible quadrotors
     Args:
@@ -283,60 +268,22 @@ def sample_random_dyn_lowinertia():
         dict: sampled quadrotor parameters
     """
     ###################################################################
-    ## DENSITIES (body, payload, arms, motors, propellers)
-    # Crazyflie estimated body / payload / arms / motors / props density: 1388.9 / 1785.7 / 1777.8 / 1948.8 / 246.6 kg/m^3
-    # Hummingbird estimated body / payload / arms / motors/ props density: 588.2 / 173.6 / 1111.1 / 509.3 / 246.6 kg/m^3
+    ## Masses and dimensions
+    # Estimated Crazyflie mass / dimension / arm length : ~0.027 [kg] / 0.065 x 0.065 [m] / 0.092 [m]
+    # Estimated Hummingbird mass / dimension /arm length : ~0.547 [kg] / 0.764 x 0.764 [m] / 0.540 [m]
     geom_params = {}
-    dens_val = np.random.uniform(
-        low=[1500., 1500., 150., 150., 15.], 
-        high=[2500., 2500., 250., 250., 25.])
-    
-    geom_params["body"] = {"density": dens_val[0]}
-    geom_params["payload"] = {"density": dens_val[1]}
-    geom_params["arms"] = {"density": dens_val[2]}
-    geom_params["motors"] = {"density": dens_val[3]}
-    geom_params["propellers"] = {"density": dens_val[4]}
 
+    geom_params["mass"] = np.random.uniform(low=0.020, high=0.6)
     ###################################################################
     ## GEOMETRIES
-    # MOTORS (and overal size)
-    total_w = np.random.uniform(low=0.05, high=0.2)
-    total_l = np.clip(np.random.normal(loc=1., scale=0.1), a_min=1.0, a_max=None) * total_w
-    motor_z = np.random.normal(loc=0., scale=total_w / 8.)
-    geom_params["motor_pos"] = {"xyz": [total_w / 2., total_l / 2., motor_z]}
-    geom_params["motors"]["r"] = total_w * np.random.normal(loc=0.1, scale=0.01)
-    geom_params["motors"]["h"] = geom_params["motors"]["r"] * np.random.normal(loc=1.0, scale=0.05)
-    
-    # BODY
-    w_low, w_high = 0.2, 0.4
-    w_coeff = np.random.uniform(low=w_low, high=w_high)
-    geom_params["body"]["w"] = w_coeff * total_w
-    ## Promotes more elangeted bodies when they are more narrow
-    l_scale = (1. - (w_coeff - w_low) / (w_high - w_low))
-    geom_params["body"]["l"] =  np.clip(np.random.normal(loc=1., scale=l_scale), a_min=1.0, a_max=2.0) * geom_params["body"]["w"]
-    geom_params["body"]["h"] =  np.random.uniform(low=0.25, high=1.0) * geom_params["body"]["w"]
+    ## arm length here represents the diagonal motor to motor distance
+    arm_length = np.random.uniform(low=0.05, high=0.5)
+    geom_params["arms"] = {"l": arm_length}
+    motor_pos_x = motor_pos_y = arm_length * np.sqrt(2) / 4
+    geom_params["motor_pos"] = {"xyz": [motor_pos_x, motor_pos_y, 0.0]}
 
-    # PAYLOAD
-    pl_scl = np.random.uniform(low=0.50, high=1.0, size=2)
-    pl_scl_h = np.random.uniform(low=0.25, high=0.75, size=1)
-    geom_params["payload"]["w"] =  pl_scl[0] * geom_params["body"]["w"]
-    geom_params["payload"]["l"] =  pl_scl[1] * geom_params["body"]["l"]
-    geom_params["payload"]["h"] =  pl_scl_h[0] * geom_params["body"]["h"]
-    geom_params["payload_pos"] = {
-            "xy": np.random.normal(loc=0., scale=geom_params["body"]["w"] / 10., size=2), 
-            "z_sign": np.sign(np.random.uniform(low=-1, high=1))}
-    # z_sing corresponds to location (+1 - on top of the body, -1 - on the bottom of the body)
+    thrust_to_weight = np.random.uniform(low=1.5, high=3.5)
 
-    # ARMS
-    geom_params["arms"]["w"] = total_w * np.random.normal(loc=0.05, scale=0.005)
-    geom_params["arms"]["h"] = total_w * np.random.normal(loc=0.05, scale=0.005)
-    geom_params["arms_pos"] = {"angle": np.random.normal(loc=45., scale=10.), "z": motor_z - geom_params["motors"]["h"]/2.}
-    
-    # PROPS
-    thrust_to_weight = np.random.uniform(low=1.8, high=2.5)
-    geom_params["propellers"]["h"] = 0.01
-    geom_params["propellers"]["r"] = (0.3) * total_w * (thrust_to_weight / 2.0)**0.5
-    
     ## Damping parameters
     # damp_vel_scale = np.random.uniform(low=0.01, high=2.)
     # damp_omega_scale = damp_vel_scale * np.random.uniform(low=0.75, high=1.25)
@@ -374,10 +321,59 @@ def sample_random_dyn_lowinertia():
     }
 
     ## Checking everything
-    params = check_quad_param_limits(params=params)
+    # params = check_quad_param_limits(params=params)
     return params
 
 
+class Crazyflie(object):
+    def sample(self, params=None):
+        return crazyflie_params()
+
+class DefaultQuad(object):
+    def sample(self, params=None):
+        return defaultquad_params()
+
+class MediumQuad(object):
+    def sample(self, params=None):
+        return mediumquad_params()
+
+class RandomQuad(object):
+    def sample(self, params=None):
+        return randomquad_parameters()
+
+class RelativeSampler(object):
+    def __init__(self, params, noise_ratio=0., noise_ratio_custom=None, sampler="normal"):
+        self.noise_params = get_dyn_randomization_params(
+                        params, 
+                        noise_ratio=noise_ratio, 
+                        noise_ratio_params=noise_ratio_custom)
+        self.sampler = sampler
+    def sample(self, params):
+        return perturb_dyn_parameters(
+            params=params, 
+            noise_params=self.noise_params, 
+            sampler=self.sampler
+        )
+
+class AbsoluteSampler(object):
+    def __init__(self, params, noise_params, sampler="uniform"):
+        self.noise_params = copy.deepcopy(noise_params)
+        self.sampler = sampler
+        
+    def sample(self, params):
+        return resample_dyn_parameters(
+            params=params, 
+            noise_params=self.noise_params, 
+            sampler=self.sampler
+        )
+
+class ConstValueSampler(object):
+    def __init__(self, params, params_change):
+        self.params_change = copy.deepcopy(params_change)
+        
+    def sample(self, params):
+        dict_update_existing(params, dic_upd=self.params_change)
+        return params
 
     # def sample_random_nondim_dyn():
     #     """

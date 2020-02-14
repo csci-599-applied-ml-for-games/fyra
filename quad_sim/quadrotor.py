@@ -25,20 +25,20 @@ import sys
 from copy import deepcopy
 import matplotlib.pyplot as plt
 import time
-
 import gym
 from gym import spaces
 from gym.utils import seeding
 import gym.envs.registration as gym_reg
-
+from numpy.random import normal
 import transforms3d as t3d
-
-from quad_sim.quadrotor_randomization import *
+from six.moves import cPickle as pickle
+import quad_sim.quadrotor_randomization as quad_rand
 from quad_sim.quadrotor_control import *
 from quad_sim.quadrotor_obstacles import *
 from quad_sim.quadrotor_visualization import *
 from quad_sim.quad_utils import *
-from quad_sim.inertia import QuadLink
+import quad_sim.get_state as get_state
+from quad_sim.inertia import QuadLink, QuadLinkSimplified
 from quad_sim.sensor_noise import SensorNoise
 
 from quad_sim.quad_models import *
@@ -47,28 +47,20 @@ try:
     from garage.core import Serializable
 except:
     print("WARNING: garage.core.Serializable is not found. Substituting with a dummy class")
-
-
     class Serializable:
         def __init__(self):
             pass
-
         def quick_init(self, locals_in):
             pass
 
+
 logger = logging.getLogger(__name__)
 
-GRAV = 9.81  # default gravitational constant
-EPS = 1e-6  # small constant to avoid divisions by 0 and log(0)
-GOAL_TOLERANCE = 0.01
-
-# set initial epsilon to infinity
-epsilon_0 = np.inf
-epsilon_1 = np.inf
-
+GRAV = 9.81 #default gravitational constant
+EPS = 1e-6 #small constant to avoid divisions by 0 and log(0)
 
 ## WARN:
-# - linearity is set to 1 always, by means of check_quad_param_limits().
+# - linearity is set to 1 always, by means of check_quad_param_limits(). 
 # The def. value of linarity for CF is set to 1 as well (due to firmware nonlinearity compensation)
 
 class QuadrotorDynamics(object):
@@ -84,44 +76,45 @@ class QuadrotorDynamics(object):
     Coord frames: x configuration:
      - x axis between arms looking forward [x - configuration]
      - y axis pointing to the left
-     - z axis up
+     - z axis up 
     TODO:
     - only diagonal inertia is used at the moment
     """
-
     def __init__(self, model_params,
-                 room_box=None,
-                 dynamics_steps_num=1,
-                 dim_mode="3D",
-                 gravity=GRAV):
+        room_box=None,
+        dynamics_steps_num=1, 
+        dim_mode="3D",
+        gravity=GRAV,
+        dynamics_simplification=False):
 
         self.dynamics_steps_num = dynamics_steps_num
+        self.dynamics_simplification = dynamics_simplification
         ###############################################################
-        ## PARAMETERS
+        ## PARAMETERS 
         self.prop_ccw = np.array([-1., 1., -1., 1.])
         # cw = 1 ; ccw = -1 [ccw, cw, ccw, cw]
         # Reference: https://docs.google.com/document/d/1wZMZQ6jilDbj0JtfeYt0TonjxoMPIgHwYbrFrMNls84/edit
-        self.omega_max = 40.  # rad/s The CF sensor can only show 35 rad/s (2000 deg/s), we allow some extra
-        self.vxyz_max = 3.  # m/s
+        self.omega_max = 40. #rad/s The CF sensor can only show 35 rad/s (2000 deg/s), we allow some extra
+        self.vxyz_max = 3. #m/s
         self.gravity = gravity
         self.acc_max = 3. * GRAV
 
         ###############################################################
         ## Internal State variables
-        self.since_last_ort_check = 0  # counter
-        self.since_last_ort_check_limit = 0.04  # when to check for non-orthogonality
-
-        self.rot_nonort_limit = 0.01  # How much of non-orthogonality in the R matrix to tolerate
-        self.rot_nonort_coeff_maxsofar = 0.  # Statistics on the max number of nonorthogonality that we had
-
-        self.since_last_svd = 0  # counter
-        self.since_last_svd_limit = 0.5  # in sec - how ofthen mandatory orthogonalization should be applied
+        self.since_last_ort_check = 0 #counter
+        self.since_last_ort_check_limit = 0.04 #when to check for non-orthogonality
+        
+        self.rot_nonort_limit = 0.01 # How much of non-orthogonality in the R matrix to tolerate
+        self.rot_nonort_coeff_maxsofar = 0. # Statistics on the max number of nonorthogonality that we had
+        
+        self.since_last_svd = 0 #counter
+        self.since_last_svd_limit = 0.5 #in sec - how ofthen mandatory orthogonalization should be applied
 
         self.eye = np.eye(3)
         ###############################################################
         ## Initializing model
         self.update_model(model_params)
-
+        
         ## Sanity checks
         assert self.inertia.shape == (3,)
 
@@ -135,18 +128,13 @@ class QuadrotorDynamics(object):
         ## Selecting 1D, Planar or Full 3D modes
         self.dim_mode = dim_mode
         if self.dim_mode == '1D':
-            self.control_mx = np.ones([4, 1])
+            self.control_mx = np.ones([4,1])
         elif self.dim_mode == '2D':
-            self.control_mx = np.array([[1., 0.], [1., 0.], [0., 1.], [0., 1.]])
+            self.control_mx = np.array([[1.,0.],[1.,0.],[0.,1.],[0.,1.]])
         elif self.dim_mode == '3D':
             self.control_mx = np.eye(4)
         else:
             raise ValueError('QuadEnv: Unknown dimensionality mode %s' % self.dim_mode)
-
-        ## Selecting how many sim steps should be done b/w controller calls
-        # i.e. controller frequency
-        self._step = getattr(self, 'step%d' % dynamics_steps_num)
-        # self.step = getattr(QuadrotorDynamics, 'step%d' % dynamics_steps_num)
 
     @staticmethod
     def angvel2thrust(w, linearity=0.424):
@@ -155,10 +143,13 @@ class QuadrotorDynamics(object):
             linearity (float): linearity factor factor [0 .. 1].
             CrazyFlie: linearity=0.424
         """
-        return (1 - linearity) * w ** 2 + linearity * w
+        return  (1 - linearity) * w**2 + linearity * w
 
     def update_model(self, model_params):
-        self.model = QuadLink(params=model_params["geom"])
+        if self.dynamics_simplification:
+            self.model = QuadLinkSimplified(params=model_params["geom"])
+        else:
+            self.model = QuadLink(params=model_params["geom"])
         self.model_params = model_params
 
         ###############################################################
@@ -177,6 +168,8 @@ class QuadrotorDynamics(object):
         self.thrust_noise_ratio = self.model_params["noise"]["thrust_noise_ratio"]
         self.vel_damp = self.model_params["damp"]["vel"]
         self.damp_omega_quadratic = self.model_params["damp"]["omega_quadratic"]
+
+
         ###############################################################
         ## COMPUTED (Dependent) PARAMETERS
         try:
@@ -184,35 +177,39 @@ class QuadrotorDynamics(object):
         except:
             self.motor_assymetry = np.array([1.0, 1.0, 1.0, 1.0])
             print("WARNING: Motor assymetry was not setup. Setting assymetry to:", self.motor_assymetry)
-        self.motor_assymetry = self.motor_assymetry * 4. / np.sum(self.motor_assymetry)  # re-normalizing to sum-up to 4
+        self.motor_assymetry = self.motor_assymetry * 4./np.sum(self.motor_assymetry) #re-normalizing to sum-up to 4
         self.thrust_max = GRAV * self.mass * self.thrust_to_weight * self.motor_assymetry / 4.0
-        self.torque_max = self.torque_to_thrust * self.thrust_max  # propeller torque scales
+        self.torque_max = self.torque_to_thrust * self.thrust_max # propeller torque scales
 
         # Propeller positions in X configurations
         self.prop_pos = self.model.prop_pos
 
         # unit: meters^2 ??? maybe wrong
         self.prop_crossproducts = np.cross(self.prop_pos, [0., 0., 1.])
-        self.prop_ccw_mx = np.zeros([3, 4])  # Matrix allows using matrix multiplication
-        self.prop_ccw_mx[2, :] = self.prop_ccw
+        self.prop_ccw_mx = np.zeros([3,4]) # Matrix allows using matrix multiplication
+        self.prop_ccw_mx[2,:] = self.prop_ccw 
 
         ## Forced dynamics auxiliary matrices
-        # Prop crossproduct give torque directions
-        self.G_omega_thrust = self.thrust_max * self.prop_crossproducts.T  # [3,4] @ [4,1]
+        #Prop crossproduct give torque directions
+        self.G_omega_thrust = self.thrust_max * self.prop_crossproducts.T # [3,4] @ [4,1]
         # additional torques along z-axis caused by propeller rotations
         self.C_omega_prop = self.torque_max * self.prop_ccw_mx  # [3,4] @ [4,1] = [3,1]
-        self.G_omega = (1.0 / self.inertia)[:, None] * (self.G_omega_thrust + self.C_omega_prop)
+        self.G_omega = (1.0 / self.inertia)[:,None] * (self.G_omega_thrust + self.C_omega_prop)
 
         # Allows to sum-up thrusts as a linear matrix operation
-        self.thrust_sum_mx = np.zeros([3, 4])  # [0,0,F_sum].T
-        self.thrust_sum_mx[2, :] = 1  # [0,0,F_sum].T
+        self.thrust_sum_mx = np.zeros([3,4]) # [0,0,F_sum].T
+        self.thrust_sum_mx[2,:] = 1# [0,0,F_sum].T
 
         # sigma = 0.2 gives roughly max noise of -1 .. 1
-        self.thrust_noise = OUNoise(4, sigma=0.2 * self.thrust_noise_ratio)
+        self.thrust_noise = OUNoise(4, sigma=0.2*self.thrust_noise_ratio)
 
         self.arm = np.linalg.norm(self.model.motor_xyz[:2])
 
-        self._step = getattr(self, 'step%d' % self.dynamics_steps_num)
+        ## the ratio between max torque and inertia around each axis
+        ## the 0-1 matrix on the right is the way to sum-up
+        self.torque_to_inertia = self.G_omega @ np.array([[0, 0, 0], [0, 1, 1], [1, 1, 0], [1, 0, 1]])
+        self.torque_to_inertia = np.sum(self.torque_to_inertia, axis=1)
+        # self.torque_to_inertia = self.torque_to_inertia / np.linalg.norm(self.torque_to_inertia)
 
         self.reset()
 
@@ -223,7 +220,7 @@ class QuadrotorDynamics(object):
         for v in (position, velocity, omega):
             assert v.shape == (3,)
         assert thrusts.shape == (4,)
-        assert rotation.shape == (3, 3)
+        assert rotation.shape == (3,3)
         self.pos = deepcopy(position)
         self.vel = deepcopy(velocity)
         self.acc = np.zeros(3)
@@ -233,94 +230,42 @@ class QuadrotorDynamics(object):
         self.thrusts = deepcopy(thrusts)
 
     # generate a random state (meters, meters/sec, radians/sec)
-    def random_state(self, box, vel_max=15.0, omega_max=2 * np.pi):
+    def random_state(self, box, vel_max=15.0, omega_max=2*np.pi):
         pos = np.random.uniform(low=-box, high=box, size=(3,))
-
+        
         vel = np.random.uniform(low=-vel_max, high=vel_max, size=(3,))
         vel_magn = np.random.uniform(low=0., high=vel_max)
         vel = vel_magn / (np.linalg.norm(vel) + EPS) * vel
-
+        
         omega = np.random.uniform(low=-omega_max, high=omega_max, size=(3,))
         omega_magn = np.random.uniform(low=0., high=omega_max)
         omega = omega_magn / (np.linalg.norm(omega) + EPS) * omega
-
+        
         rot = rand_uniform_rot3d()
         return pos, vel, rot, omega
         # self.set_state(pos, vel, rot, omega)
 
     # generate a random state (meters, meters/sec, radians/sec)
-    def pitch_roll_restricted_random_state(self, box, vel_max=15.0, omega_max=2 * np.pi, pitch_max=0.5, roll_max=0.5,
-                                           yaw_max=3.14):
+    def pitch_roll_restricted_random_state(self, box, vel_max=15.0, omega_max=2*np.pi, pitch_max=0.5, roll_max=0.5, yaw_max=3.14):
         pos = np.random.uniform(low=-box, high=box, size=(3,))
-
+        
         vel = np.random.uniform(low=-vel_max, high=vel_max, size=(3,))
         vel_magn = np.random.uniform(low=0., high=vel_max)
         vel = vel_magn / (np.linalg.norm(vel) + EPS) * vel
-
+        
         omega = np.random.uniform(low=-omega_max, high=omega_max, size=(3,))
         omega_magn = np.random.uniform(low=0., high=omega_max)
         omega = omega_magn / (np.linalg.norm(omega) + EPS) * omega
-
+        
         pitch = np.random.uniform(low=-pitch_max, high=pitch_max)
         roll = np.random.uniform(low=-roll_max, high=roll_max)
-        yaw = np.random.uniform(low=-yaw_max, high=yaw_max)
+        yaw = np.random.uniform(low=-yaw_max, high=yaw_max) 
         rot = t3d.euler.euler2mat(roll, pitch, yaw)
         return pos, vel, rot, omega
 
+
     def step(self, thrust_cmds, dt):
-        self._step(self, thrust_cmds, dt)
-
-    # multiple dynamics steps
-    @staticmethod
-    def step2(self, thrust_cmds, dt):
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-
-    # multiple dynamics steps
-    @staticmethod
-    def step4(self, thrust_cmds, dt):
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        # print('DYN: state:', self.state_vector(), 'thrust:', thrust_cmds, 'dt', dt)
-
-    # multiple dynamics steps
-    @staticmethod
-    def step6(self, thrust_cmds, dt):
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        # print('DYN: state:', self.state_vector(), 'thrust:', thrust_cmds, 'dt', dt)
-
-    # multiple dynamics steps
-    @staticmethod
-    def step8(self, thrust_cmds, dt):
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-
-    # multiple dynamics steps
-    @staticmethod
-    def step10(self, thrust_cmds, dt):
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
-        self.step1(self, thrust_cmds, dt)
+        [self.step1(thrust_cmds, dt) for t in range(self.dynamics_steps_num)]
 
     ## Step function integrates based on current derivative values (best fits affine dynamics model)
     # thrust_cmds is motor thrusts given in normalized range [0, 1].
@@ -331,23 +276,20 @@ class QuadrotorDynamics(object):
     # rot - global
     # omega - body frame
     # goal_pos - global
-    # from numba import jit, autojit
-    # @autojit
-    @staticmethod
     def step1(self, thrust_cmds, dt):
         # print("thrust_cmds:", thrust_cmds)
         # uncomment for debugging. they are slow
-        # assert np.all(thrust_cmds >= 0)
-        # assert np.all(thrust_cmds <= 1)
+        #assert np.all(thrust_cmds >= 0)
+        #assert np.all(thrust_cmds <= 1)
 
         thrust_cmds = np.clip(thrust_cmds, a_min=0., a_max=1.)
         ###################################
         ## Filtering the thruster and adding noise
         # I use the multiplier 4, since 4*T ~ time for a step response to finish, where
         # T is a time constant of the first-order filter
-        self.motor_tau_up = 4 * dt / (self.motor_damp_time_up + EPS)
-        self.motor_tau_down = 4 * dt / (self.motor_damp_time_down + EPS)
-        motor_tau = self.motor_tau_up * np.ones([4, ])
+        self.motor_tau_up = 4*dt/(self.motor_damp_time_up + EPS)
+        self.motor_tau_down = 4*dt/(self.motor_damp_time_down + EPS)
+        motor_tau = self.motor_tau_up * np.ones([4,])
         motor_tau[thrust_cmds < self.thrust_cmds_damp] = self.motor_tau_down
         motor_tau[motor_tau > 1.] = 1.
 
@@ -355,23 +297,23 @@ class QuadrotorDynamics(object):
         # WARNING: Unfortunately if the linearity != 1 then filtering using square root is not quite correct
         # since it likely means that you are using rotational velocities as an input instead of the thrust and hence
         # you are filtering square roots of angular velocities
-        thrust_rot = thrust_cmds ** 0.5
-        self.thrust_rot_damp = motor_tau * (thrust_rot - self.thrust_rot_damp) + self.thrust_rot_damp
-        self.thrust_cmds_damp = self.thrust_rot_damp ** 2
+        thrust_rot = thrust_cmds**0.5
+        self.thrust_rot_damp = motor_tau * (thrust_rot - self.thrust_rot_damp) + self.thrust_rot_damp       
+        self.thrust_cmds_damp = self.thrust_rot_damp**2
 
         ## Adding noise
         thrust_noise = thrust_cmds * self.thrust_noise.noise()
-        self.thrust_cmds_damp = np.clip(self.thrust_cmds_damp + thrust_noise, 0.0, 1.0)
+        self.thrust_cmds_damp = np.clip(self.thrust_cmds_damp + thrust_noise, 0.0, 1.0)        
 
         thrusts = self.thrust_max * self.angvel2thrust(self.thrust_cmds_damp, linearity=self.motor_linearity)
-        # Prop crossproduct give torque directions
-        torques = self.prop_crossproducts * thrusts[:, None]  # (4,3)=(props, xyz)
+        #Prop crossproduct give torque directions
+        self.torques = self.prop_crossproducts * thrusts[:,None] # (4,3)=(props, xyz)
 
         # additional torques along z-axis caused by propeller rotations
-        torques[:, 2] += self.torque_max * self.prop_ccw * self.thrust_cmds_damp
+        self.torques[:, 2] += self.torque_max * self.prop_ccw * self.thrust_cmds_damp
 
         # net torque: sum over propellers
-        thrust_torque = np.sum(torques, axis=0)
+        thrust_torque = np.sum(self.torques, axis=0) 
 
         ###################################
         ## Rotor drag and Rolling forces and moments
@@ -386,45 +328,44 @@ class QuadrotorDynamics(object):
             vel_body = self.rot.T @ self.vel
             v_rotors = vel_body + cross_vec_mx4(self.omega, self.model.prop_pos)
             # assert v_rotors.shape == (4,3)
-            v_rotors[:, 2] = 0.  # Projection to the rotor plane
+            v_rotors[:,2] = 0. #Projection to the rotor plane
 
             # Drag/Roll of rotors (both in body frame)
-            rotor_drag_fi = - self.C_rot_drag * np.sqrt(self.thrust_cmds_damp)[:, None] * v_rotors  # [4,3]
+            rotor_drag_fi = - self.C_rot_drag * np.sqrt(self.thrust_cmds_damp)[:,None] * v_rotors #[4,3]
             rotor_drag_force = np.sum(rotor_drag_fi, axis=0)
             # rotor_drag_ti = np.cross(rotor_drag_fi, self.model.prop_pos)#[4,3] x [4,3]
-            rotor_drag_ti = cross_mx4(rotor_drag_fi, self.model.prop_pos)  # [4,3] x [4,3]
+            rotor_drag_ti = cross_mx4(rotor_drag_fi, self.model.prop_pos)#[4,3] x [4,3]
             rotor_drag_torque = np.sum(rotor_drag_ti, axis=0)
-
-            rotor_roll_torque = - self.C_rot_roll * self.prop_ccw[:, None] * np.sqrt(self.thrust_cmds_damp)[:,
-                                                                             None] * v_rotors  # [4,3]
+            
+            rotor_roll_torque = - self.C_rot_roll * self.prop_ccw[:,None] * np.sqrt(self.thrust_cmds_damp)[:,None] * v_rotors #[4,3]
             rotor_roll_torque = np.sum(rotor_roll_torque, axis=0)
             rotor_visc_torque = rotor_drag_torque + rotor_roll_torque
 
             ## Constraints (prevent numerical instabilities)
             vel_norm = np.linalg.norm(vel_body)
             rdf_norm = np.linalg.norm(rotor_drag_force)
-            rdf_norm_clip = np.clip(rdf_norm, a_min=0., a_max=vel_norm * self.mass / (2 * dt))
+            rdf_norm_clip = np.clip(rdf_norm, a_min=0., a_max=vel_norm*self.mass/(2*dt))
             if rdf_norm > EPS:
                 rotor_drag_force = (rotor_drag_force / rdf_norm) * rdf_norm_clip
 
             # omega_norm = np.linalg.norm(self.omega)
             rvt_norm = np.linalg.norm(rotor_visc_torque)
-            rvt_norm_clipped = np.clip(rvt_norm, a_min=0., a_max=np.linalg.norm(self.omega * self.inertia) / (2 * dt))
+            rvt_norm_clipped = np.clip(rvt_norm, a_min=0., a_max=np.linalg.norm(self.omega*self.inertia)/(2*dt))
             if rvt_norm > EPS:
                 rotor_visc_torque = (rotor_visc_torque / rvt_norm) * rvt_norm_clipped
 
-                # print("v", self.vel, "\nomega:\n",self.omega, "\nv_rotors:\n", v_rotors, "\nrotor_drag_fi:\n", rotor_drag_fi)
-                # if rvt_norm_clipped/rvt_norm < 1 or rdf_norm_clip/rdf_norm < 1:
-                #     print("Clip:", rvt_norm_clipped/rvt_norm, rdf_norm_clip/rdf_norm)
-                #     print("---------------------------------------------------------------")
+            # print("v", self.vel, "\nomega:\n",self.omega, "\nv_rotors:\n", v_rotors, "\nrotor_drag_fi:\n", rotor_drag_fi)
+            # if rvt_norm_clipped/rvt_norm < 1 or rdf_norm_clip/rdf_norm < 1:
+            #     print("Clip:", rvt_norm_clipped/rvt_norm, rdf_norm_clip/rdf_norm)
+            #     print("---------------------------------------------------------------")
         else:
             rotor_visc_torque = rotor_drag_torque = rotor_drag_force = rotor_roll_torque = np.zeros(3)
 
         ###################################
         ## (Square) Damping using torques (in case we would like to add damping using torques)
         # damping_torque = - 0.3 * self.omega * np.fabs(self.omega)
-        torque = thrust_torque + rotor_visc_torque
-        thrust = npa(0, 0, np.sum(thrusts))
+        self.torque =  thrust_torque + rotor_visc_torque
+        thrust = npa(0,0,np.sum(thrusts))
 
         #########################################################
         ## ROTATIONAL DYNAMICS
@@ -432,7 +373,7 @@ class QuadrotorDynamics(object):
 
         ###################################
         ## Integrating rotations (based on current values)
-        omega_vec = np.matmul(self.rot, self.omega)  # Change from body2world frame
+        omega_vec = np.matmul(self.rot, self.omega) # Change from body2world frame
         wx, wy, wz = omega_vec
         omega_norm = np.linalg.norm(omega_vec)
         if omega_norm != 0:
@@ -442,10 +383,10 @@ class QuadrotorDynamics(object):
             dRdt = self.eye + np.sin(rot_angle) * K + (1. - np.cos(rot_angle)) * (K @ K)
             self.rot = dRdt @ self.rot
 
+        ## SVD is not strictly required anymore. Performing it rarely, just in case
         self.since_last_svd += dt
         if self.since_last_svd > self.since_last_svd_limit:
             ## Perform SVD orthogonolization
-            # try:
             u, s, v = np.linalg.svd(self.rot)
             self.rot = np.matmul(u, v)
             self.since_last_svd = 0
@@ -457,16 +398,16 @@ class QuadrotorDynamics(object):
         ## Linear damping
 
         # This is only for linear damping of angular velocity.
-        # omega_damp = 0.999
+        # omega_damp = 0.999   
         # self.omega = omega_damp * self.omega + dt * omega_dot
 
-        omega_dot = ((1.0 / self.inertia) *
-                     (cross(-self.omega, self.inertia * self.omega) + torque))
+        self.omega_dot = ((1.0 / self.inertia) *
+            (cross(-self.omega, self.inertia * self.omega) + self.torque))
 
         ## Quadratic damping
         # 0.03 corresponds to roughly 1 revolution per sec
         omega_damp_quadratic = np.clip(self.damp_omega_quadratic * self.omega ** 2, a_min=0.0, a_max=1.0)
-        self.omega = self.omega + (1.0 - omega_damp_quadratic) * dt * omega_dot
+        self.omega = self.omega + (1.0 - omega_damp_quadratic) * dt * self.omega_dot
         self.omega = np.clip(self.omega, a_min=-self.omega_max, a_max=self.omega_max)
 
         ## When use square damping on torques - use simple integration
@@ -478,7 +419,7 @@ class QuadrotorDynamics(object):
 
         ## Room constraints
         mask = np.logical_or(self.pos <= self.room_box[0], self.pos >= self.room_box[1])
-
+               
         ## Computing position
         self.pos = self.pos + dt * self.vel
 
@@ -496,7 +437,7 @@ class QuadrotorDynamics(object):
         self.vel = (1.0 - self.vel_damp) * self.vel + dt * acc
         # self.vel[mask] = 0. #If we leave the room - stop flying
 
-        ## Accelerometer measures so called "proper acceleration"
+        ## Accelerometer measures so called "proper acceleration" 
         # that includes gravity with the opposite sign
         self.accelerometer = np.matmul(self.rot.T, acc + [0, 0, self.gravity])
 
@@ -506,26 +447,27 @@ class QuadrotorDynamics(object):
 
     def rotors_drag_roll_glob_frame(self):
         # omega [3,] x prop_pos [4,3] = v_rot_body [4, 3]
-        # R[3,3] @ prop_pos.T[3,4] = v_rotors[3,4]
+        # R[3,3] @ prop_pos.T[3,4] = v_rotors[3,4]  
         v_rotors = self.vel + self.rot @ np.cross(self.omega, self.model.prop_pos).T
-        rot_z = self.rot[:, 2]
+        rot_z = self.rot[:,2]
 
         # [3,4] = [3,4] - ([3,4].T @ [3,1]).T * [3,4]
-        v_rotors_perp = v_rotors - (v_rotors.T @ rot_z).T * np.repeat(rot_z, 4, axis=1)
+        v_rotors_perp = v_rotors - (v_rotors.T @ rot_z).T * np.repeat(rot_z,4, axis=1)
 
         # Drag/Roll of rotors
-        rotor_drag = - self.C_rot_drag * np.sqrt(self.thrust_cmds_damp) * v_rotors_perp  # [3,4]
-        rotor_roll_torque = self.C_rot_roll * np.sqrt(self.thrust_cmds_damp) * v_rotors_perp  # [3,4]
+        rotor_drag = - self.C_rot_drag * np.sqrt(self.thrust_cmds_damp) * v_rotors_perp #[3,4]
+        rotor_roll_torque =   self.C_rot_roll * np.sqrt(self.thrust_cmds_damp) * v_rotors_perp #[3,4]
+
 
     #######################################################
     ## AFFINE DYNAMICS REPRESENTATION:
     # s = dt*(F(s) + G(s)*u)
-
+    
     ## Unforced dynamics (integrator, damping_deceleration)
     def F(self, s, dt):
-        xyz = s[0:3]
+        xyz  = s[0:3]
         Vxyz = s[3:6]
-        rot = s[6:15].reshape([3, 3])
+        rot = s[6:15].reshape([3,3])
         omega = s[15:18]
         goal = s[18:21]
 
@@ -539,7 +481,7 @@ class QuadrotorDynamics(object):
 
         ###############################
         ## Angular orientation change
-        omega_vec = np.matmul(rot, omega)  # Change from body2world frame
+        omega_vec = np.matmul(rot, omega) # Change from body2world frame
         wx, wy, wz = omega_vec
         omega_mat_deriv = np.array([[0, -wz, wy], [wz, 0, -wx], [-wy, wx, 0]])
 
@@ -558,27 +500,29 @@ class QuadrotorDynamics(object):
 
         return np.concatenate([dx, dV, dR, dOmega, dgoal])
 
+
     ## Forced affine dynamics (controlling acceleration only)
     def G(self, s):
-        xyz = s[0:3]
+        xyz  = s[0:3]
         Vxyz = s[3:6]
-        rot = s[6:15].reshape([3, 3])
+        rot = s[6:15].reshape([3,3])
         omega = s[15:18]
         goal = s[18:21]
 
         ###############################
         ## dx, dV, dR, dgoal
-        dx = np.zeros([3, 4])
-        dV = (rot / self.mass) @ (self.thrust_max * self.thrust_sum_mx)
-        dR = np.zeros([9, 4])
-        dgoal = np.zeros([3, 4])
-
+        dx = np.zeros([3,4])
+        dV = (rot / self.mass ) @ (self.thrust_max * self.thrust_sum_mx)
+        dR = np.zeros([9,4])
+        dgoal = np.zeros([3,4])
+        
         ###############################
         ## Angular acceleration
         omega_damp_quadratic = np.clip(self.damp_omega_quadratic * omega ** 2, a_min=0.0, a_max=1.0)
-        dOmega = (1.0 - omega_damp_quadratic)[:, None] * self.G_omega
-
+        dOmega = (1.0 - omega_damp_quadratic)[:,None] * self.G_omega
+        
         return np.concatenate([dx, dV, dR, dOmega, dgoal], axis=0) @ self.control_mx
+
 
     # return eye, center, up suitable for gluLookAt representing onboard camera
     def look_at(self):
@@ -587,9 +531,9 @@ class QuadrotorDynamics(object):
         # camera slightly below COM
         eye = self.pos + np.matmul(R, [0, 0, -0.02])
         theta = np.radians(degrees_down)
-        to, _ = normalize(np.cos(theta) * R[:, 0] - np.sin(theta) * R[:, 2])
+        to, _ = normalize(np.cos(theta) * R[:,0] - np.sin(theta) * R[:,2])
         center = eye + to
-        up = cross(to, R[:, 1])
+        up = cross(to, R[:,1])
         return eye, center, up
 
     def state_vector(self):
@@ -603,29 +547,13 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
-def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, flags):
+def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, rew_coeff, action_prev):
     ##################################################
     ## log to create a sharp peak at the goal
-    # dist = np.linalg.norm(goal - dynamics.pos)
-    # TODO: add in new goal here if distance is less than a certain threshold?
-    # loss_pos = rew_coeff["pos"] * (
-    # rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
+    dist = np.linalg.norm(goal - dynamics.pos)
+    loss_pos = rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
     # loss_pos = dist
 
-    global epsilon_0
-    global epsilon_1
-
-    dist_0 = np.linalg.norm(goals[0] - dynamics.pos)
-    epsilon_0 = min(epsilon_0, dist_0)
-    loss_pos_0 = rew_coeff["pos"] * epsilon_0 * dist_0
-
-    dist_1 = np.linalg.norm(goals[1] - dynamics.pos)
-    epsilon_1 = min(epsilon_1, dist_1)
-    loss_pos_1 = flags[0] * rew_coeff["pos"] * epsilon_1 * dist_1
-
-    loss_pos = loss_pos_0 + loss_pos_1
-
-    #print("DIST_0: " + str(dist_0))
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
 
@@ -638,40 +566,40 @@ def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached,
     # penalize amount of control effort
     loss_effort = rew_coeff["effort"] * np.linalg.norm(action)
     dact = action - action_prev
-    loss_act_change = rew_coeff["action_change"] * (dact[0] ** 2 + dact[1] ** 2 + dact[2] ** 2 + dact[3] ** 2) ** 0.5
+    loss_act_change = rew_coeff["action_change"] * (dact[0]**2 + dact[1]**2 + dact[2]**2 + dact[3]**2)**0.5
 
     ##################################################
     ## loss velocity
     # dx = goal - dynamics.pos
     # dx = dx / (np.linalg.norm(dx) + EPS)
-
-    ## normalized
+    
+    ## normalized    
     # vel_direct = dynamics.vel / (np.linalg.norm(dynamics.vel) + EPS)
     # vel_magn = np.clip(np.linalg.norm(dynamics.vel),-1, 1)
-    # vel_clipped = vel_magn * vel_direct
+    # vel_clipped = vel_magn * vel_direct 
     # vel_proj = np.dot(dx, vel_clipped)
     # loss_vel_proj = - rew_coeff["vel_proj"] * dist * vel_proj
 
-    # loss_vel_proj = 0.
+    # loss_vel_proj = 0. 
     loss_vel = rew_coeff["vel"] * np.linalg.norm(dynamics.vel)
 
     ##################################################
     ## Loss orientation
-    loss_orient = -rew_coeff["orient"] * dynamics.rot[2, 2]
-    loss_yaw = -rew_coeff["yaw"] * dynamics.rot[0, 0]
+    loss_orient = -rew_coeff["orient"] * dynamics.rot[2,2] 
+    loss_yaw = -rew_coeff["yaw"] * dynamics.rot[0,0]
     # Projection of the z-body axis to z-world axis
     # Negative, because the larger the projection the smaller the loss (i.e. the higher the reward)
-    rot_cos = ((dynamics.rot[0, 0] + dynamics.rot[1, 1] + dynamics.rot[2, 2]) - 1.) / 2.
-    # We have to clip since rotation matrix falls out of orthogonalization from time to time
-    loss_rotation = rew_coeff["rot"] * np.arccos(np.clip(rot_cos, -1., 1.))  # angle = arccos((trR-1)/2) See: [6]
-    loss_attitude = rew_coeff["attitude"] * np.arccos(np.clip(dynamics.rot[2, 2], -1., 1.))
+    rot_cos = ((dynamics.rot[0,0] +  dynamics.rot[1,1] +  dynamics.rot[2,2]) - 1.)/2.
+    #We have to clip since rotation matrix falls out of orthogonalization from time to time
+    loss_rotation = rew_coeff["rot"] * np.arccos(np.clip(rot_cos, -1.,1.)) #angle = arccos((trR-1)/2) See: [6]
+    loss_attitude = rew_coeff["attitude"] * np.arccos(np.clip(dynamics.rot[2,2], -1.,1.))
 
     ##################################################
     ## Loss for constant uncontrolled rotation around vertical axis
     # loss_spin_z  = rew_coeff["spin_z"]  * abs(dynamics.omega[2])
     # loss_spin_xy = rew_coeff["spin_xy"] * np.linalg.norm(dynamics.omega[:2])
-    # loss_spin = rew_coeff["spin"] * np.linalg.norm(dynamics.omega)
-    loss_spin = rew_coeff["spin"] * (dynamics.omega[0] ** 2 + dynamics.omega[1] ** 2 + dynamics.omega[2] ** 2) ** 0.5
+    # loss_spin = rew_coeff["spin"] * np.linalg.norm(dynamics.omega) 
+    loss_spin = rew_coeff["spin"] * (dynamics.omega[0]**2 + dynamics.omega[1]**2 + dynamics.omega[2]**2)**0.5 
 
     ##################################################
     ## loss crash
@@ -681,9 +609,9 @@ def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached,
     # rew_info = {'rew_crash': -loss_crash, 'rew_altitude': -loss_alt, 'rew_action': -loss_effort, 'rew_pos': -loss_pos, 'rew_vel_proj': -loss_vel_proj}
 
     reward = -dt * np.sum([
-        loss_pos,
-        loss_effort,
-        loss_crash,
+        loss_pos, 
+        loss_effort, 
+        loss_crash, 
         loss_orient,
         loss_yaw,
         loss_rotation,
@@ -693,25 +621,23 @@ def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached,
         # loss_spin_xy,
         loss_act_change,
         loss_vel
-        ]) # + dt * np.sum(flags)
+        ])
+    
 
     rew_info = {
-        "rew_main": -loss_pos,
-        'rew_pos': -loss_pos,
-        'rew_action': -loss_effort,
-        'rew_crash': -loss_crash,
-        "rew_orient": -loss_orient,
-        "rew_yaw": -loss_yaw,
-        "rew_rot": -loss_rotation,
-        "rew_attitude": -loss_attitude,
-        "rew_spin": -loss_spin,
-        # "rew_spin_z": -loss_spin_z,
-        # "rew_spin_xy": -loss_spin_xy,
-        # "rew_act_change": -loss_act_change,
-        "rew_vel": -loss_vel,
-        # "rew_reached": reached
-        "rew_reached_0": flags[0],
-        "rew_reached_1": flags[1]
+    "rew_main": -loss_pos,
+    'rew_pos': -loss_pos, 
+    'rew_action': -loss_effort, 
+    'rew_crash': -loss_crash, 
+    "rew_orient": -loss_orient,
+    "rew_yaw": -loss_yaw,
+    "rew_rot": -loss_rotation,
+    "rew_attitude": -loss_attitude,
+    "rew_spin": -loss_spin,
+    # "rew_spin_z": -loss_spin_z,
+    # "rew_spin_xy": -loss_spin_xy,
+    # "rew_act_change": -loss_act_change,
+    "rew_vel": -loss_vel
     }
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
@@ -720,8 +646,6 @@ def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached,
         for key, value in locals().items():
             print('%s: %s \n' % (key, str(value)))
         raise ValueError('QuadEnv: reward is Nan')
-
-    #print("REW: " + str(reward) + ", DIST_0: " + str(dist_0) + ", EPS_0: " + str(epsilon_0) + ", LOSS_0: " + str(loss_pos_0) + ", FLAGS: " + str(flags))
 
     return reward, rew_info
 
@@ -735,17 +659,15 @@ def compute_reward_weighted(dynamics, goal, goals, action, dt, crashed, reached,
 class QuadrotorEnv(gym.Env, Serializable):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
-        'video.frames_per_second': 50
+        'video.frames_per_second' : 50
     }
 
-    def __init__(self, dynamics_params="defaultquad", dynamics_change=None,
-                 dynamics_randomize_every=None, dynamics_randomization_ratio=0.,
-                 dynamics_randomization_ratio_params=None,
-                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200.,
-                 sim_steps=2,
-                 obs_repr="xyz_vxyz_rot_omega_reached", ep_time=4, obstacles_num=0, room_size=10, init_random_state=False,
-                 rew_coeff=None, sense_noise=None, point_distance=0.5, verbose=False, gravity=GRAV, resample_goal=False, num_goals = 2, num_vis_goals=2, goals = [], 
-    ):
+    def __init__(self, dynamics_params="defaultquad", dynamics_change=None, 
+                dynamics_randomize_every=None, dyn_sampler_1=None, dyn_sampler_2=None,
+                raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
+                obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
+                rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
+                t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False):
         np.seterr(under='ignore')
         """
         Args:
@@ -755,9 +677,11 @@ class QuadrotorEnv(gym.Env, Serializable):
                 One can randomize dynamics during the end of any episode using resample_dynamics()
                 WARNING: randomization during an episode is not supported yet. Randomize ONLY before calling reset().
             dynamics_change: [dict] update to dynamics parameters relative to dynamics_params provided
+            
             dynamics_randomize_every: [int] how often (trajectories) perform randomization
-            dynamics_randomization_ratio: [float] randomization ratio relative to the nominal values of parameters
-            dynamics_randomization_ratio_params: [dict] if a few dyn params require custom randomization ratios - provide them in this dict
+            dynamics_sampler_1: [dict] the first sampler to be applied. Dict must contain type (see quadrotor_randomization) and whatever params samler requires
+            dynamics_sampler_2: [dict] the second sampler to be applied. Convenient if you need to fix some params after sampling.
+            
             raw_control: [bool] use raw cantrol or the Mellinger controller as a default
             raw_control_zero_middle: [bool] meaning that control will be [-1 .. 1] rather than [0 .. 1]
             dim_mode: [str] Dimensionality of the env. Options: 1D(just a vertical stabilization), 2D(vertical plane), 3D(normal)
@@ -771,19 +695,11 @@ class QuadrotorEnv(gym.Env, Serializable):
             init_random_state: [bool] use random state initialization or horizontal initialization with 0 velocities
             rew_coeff: [dict] weights for different reward components (see compute_weighted_reward() function)
             sens_noise (dict or str): sensor noise parameters. If None - no noise. If "default" then the default params are loaded. Otherwise one can provide specific params.
+            excite: [bool] change the setpoint at the fixed frequency to perturb the quad
         """
         ## ARGS
         self.init_random_state = init_random_state
         self.room_size = room_size
-        # if first character of obs rep is a number, use the number to set number of visible states
-        
-        if obs_repr[0].isdigit():
-            self.num_vis_goals = int(obs_repr[0])
-        else:
-            self.num_vis_goals = num_vis_goals        
-
-        self.flags = np.zeros([self.num_vis_goals])
-
         self.obs_repr = obs_repr
         self.sim_steps = sim_steps
         self.dim_mode = dim_mode
@@ -797,145 +713,91 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.update_sense_noise(sense_noise=sense_noise)
         self.gravity = gravity
         self.resample_goal = resample_goal
-        self.curr_goal = 0
+        # multiple goals
+        self.num_goals = num_goals
+        self.goal_dist = goal_dist
+        self.reached = np.zeros(self.num_goals)
 
+        if self.num_goals > 1:
+            assert 'nxyz' in self.obs_repr, "If using multiple goals, use nxyz in obs_repr."
+
+        ## t2w and t2t ranges
+        self.t2w_std = t2w_std
+        self.t2w_min = 1.5
+        self.t2w_max = 10.0
+
+        self.t2t_std = t2t_std
+        self.t2t_min = 0.005
+        self.t2t_max = 1.0
+        self.excite = excite
+        ## dynmaics simplification
+        self.dynamics_simplification = dynamics_simplification
         ## PARAMS
-        self.max_init_vel = 1.  # m/s
-        self.max_init_omega = 2 * np.pi  # rad/s
+        self.max_init_vel = 1. # m/s
+        self.max_init_omega = 2 * np.pi #rad/s
         # self.pitch_max = 1. #rad
         # self.roll_max = 1.  #rad
         # self.yaw_max = np.pi   #rad
 
-        self.room_box = np.array(
-            [[-self.room_size, -self.room_size, 0], [self.room_size, self.room_size, self.room_size]])
-        if self.num_vis_goals > 0:
-            self.state_vector = getattr(self, "xstate_xyz_vxyz_rot_omega_reached")
-        else:
-            self.state_vector = getattr(self, "state_" + self.obs_repr)
-  
+        self.room_box = np.array([[-self.room_size, -self.room_size, 0], [self.room_size, self.room_size, self.room_size]])
+        self.state_vector = getattr(get_state, "state_" + self.obs_repr)
         ## WARN: If you
         # size of the box from which initial position will be randomly sampled
         # if box_scale > 1.0 then it will also growevery episode
         self.box = 2.0
-        self.box_scale = 1.0  # scale the initialbox by this factor eache episode
+        self.box_scale = 1.0 #scale the initialbox by this factor eache episode
 
         ## Statistics vars
         self.traj_count = 0
 
         ###############################################################################
         ## DYNAMICS (and randomization)
-        if dynamics_params == "random":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_dyn
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "random_with_linearity":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_with_linearity
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "random_t2w_15_25":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_thrust2weight_15_25
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "random_t2w_15_35":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_thrust2weight_15_35
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "random_t2w_20_30":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_thrust2weight_20_30
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "random_t2w_20_40":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_thrust2weight_20_40
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "random_t2w_20_50":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_random_thrust2weight_20_50
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "crazyflie_t2w_18_25":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_crazyflie_thrust2weight_18_25
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "crazyflie_t2w_15_25":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_crazyflie_thrust2weight_15_25
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "crazyflie_t2w_15_35":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_crazyflie_thrust2weight_15_35
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "crazyflie_t2w_20_30":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_crazyflie_thrust2weight_20_30
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "crazyflie_t2w_20_40":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_crazyflie_thrust2weight_20_40
-            self.dynamics_params = self.dyn_sampler()
-        elif dynamics_params == "crazyflie_t2w_20_50":
-            self.dynamics_params_def = None
-            self.dyn_sampler = sample_crazyflie_thrust2weight_20_50
-            self.dynamics_params = self.dyn_sampler()
-        else:
-            ## Setting the quad dynamics params
-            if isinstance(dynamics_params, str)        :
-                self.dynamics_params_def = globals()[dynamics_params + "_params"]()
-            elif isinstance(dynamics_params, dict):
-                # This option is good when you only partially provide parameters of the model
-                # For example if you are making some sort of a search, from the initial model
-                self.dynamics_params_def = copy.deepcopy(dynamics_params)
 
-            ## Now, updating if we are providing modifications
-            if dynamics_change is not None:
-                # self.dynamics_params_def.update(dynamics_change)
-                dict_update_existing(self.dynamics_params_def, dynamics_change)
-
-            ## Setting randomization params
-            if self.dynamics_randomize_every is not None:
-                self.dyn_randomization_params = get_dyn_randomization_params(
-                    quad_params=self.dynamics_params_def,
-                    noise_ratio=dynamics_randomization_ratio,
-                    noise_ratio_params=dynamics_randomization_ratio_params)
-                if self.verbose:
-                    print("###############################################")
-                    print("DYN RANDOMIZATION PARAMS:")
-                    print_dic(self.dyn_randomization_params)
-                    print("###############################################")
-            self.dynamics_params = self.dynamics_params_def
+        # Could be dynamics of a specific quad or a random dynamics (i.e. randomquad)
+        self.dyn_base_sampler = getattr(quad_rand, dynamics_params)()
+        self.dynamics_change = copy.deepcopy(dynamics_change)
+        
+        self.dynamics_params = self.dyn_base_sampler.sample()
+        ## Now, updating if we are providing modifications
+        if self.dynamics_change is not None:
+            dict_update_existing(self.dynamics_params, self.dynamics_change)
+        
+        self.dyn_sampler_1 = dyn_sampler_1
+        if dyn_sampler_1 is not None:
+            sampler_type = dyn_sampler_1["type"]
+            self.dyn_sampler_1_params = copy.deepcopy(dyn_sampler_1)
+            del self.dyn_sampler_1_params["type"]
+            self.dyn_sampler_1 = getattr(quad_rand, sampler_type)(params=self.dynamics_params, **self.dyn_sampler_1_params)
+        
+        self.dyn_sampler_2 = dyn_sampler_2
+        if dyn_sampler_2 is not None:
+            sampler_type = dyn_sampler_2["type"]
+            self.dyn_sampler_2_params = copy.deepcopy(dyn_sampler_2)
+            del self.dyn_sampler_2_params["type"]
+            self.dyn_sampler_2 = getattr(quad_rand, sampler_type)(params=self.dynamics_params, **self.dyn_sampler_2_params)
+        
 
         ## Updating dynamics
         dyn_upd_start_time = time.time()
-        self.update_dynamics(dynamics_params=self.dynamics_params)
+        ## Also performs update of the dynamics
+        self.resample_dynamics()
+        # self.update_dynamics(dynamics_params=self.dynamics_params)
         print("QuadEnv: Dyn update time: ", time.time() - dyn_upd_start_time)
-
-        # distance between random points; ensures points on a trajectory are equidistant
-        self.point_distance = point_distance
-
-        # number of goals in trajectory
-        self.num_goals = num_goals
-
-        # no goals passed in
-        self.goals = np.asarray(goals)
         
-        
-        if self.goals.size < self.num_goals:
-            # make a 2d array of goal states
-            self.goals = np.empty([self.num_goals, 3], dtype=np.float32)
-            self.sample_goals() 
-
-        # sample more goals if not enough have been passed in
-        # print(self.goals.shape)
-        
-        print("======== goals =========")
-        print(self.goals)
+        if self.verbose:
+            print("###############################################")
+            print("DYN RANDOMIZATION PARAMS:")
+            print_dic(self.dyn_randomization_params)
+            print("###############################################")
+            self.dynamics_params = self.dynamics_params_def
 
         ###############################################################################
         ## OBSERVATIONS
-        self.observation_space = self.get_observation_space()
+        self.observation_space = self.make_observation_space()
 
         ################################################################################
         ## DIMENSIONALITY
-        if self.dim_mode == '1D':
+        if self.dim_mode =='1D' or self.dim_mode == '2D':
             self.viewpoint = 'side'
         else:
             self.viewpoint = 'chase'
@@ -943,35 +805,34 @@ class QuadrotorEnv(gym.Env, Serializable):
         ################################################################################
         ## EPISODE PARAMS
         # TODO get this from a wrapper
-        self.ep_time = ep_time  # In seconds
+        self.ep_time = ep_time #In seconds
         self.dt = 1.0 / sim_freq
         self.metadata["video.frames_per_second"] = sim_freq / self.sim_steps
         self.ep_len = int(self.ep_time / (self.dt * self.sim_steps))
         self.tick = 0
         self.crashed = False
         self.control_freq = sim_freq / sim_steps
-        self.reached = False
 
         #########################################
         ## REWARDS PARAMS
         self.rew_coeff = {
             "pos": 1., "pos_offset": 0.1, "pos_log_weight": 1., "pos_linear_weight": 0.1,
-            "effort": 0.01,
+            "effort": 0.01, 
             "action_change": 0.,
-            "crash": 1.,
+            "crash": 1., 
             "orient": 1., "yaw": 0., "rot": 0., "attitude": 0.,
             # "spin_z": 0.5, "spin_xy": 0.5,
             "spin": 0.,
             "vel": 0.}
         rew_coeff_orig = copy.deepcopy(self.rew_coeff)
 
-        if rew_coeff is not None:
+        if rew_coeff is not None: 
             assert isinstance(rew_coeff, dict)
             assert set(rew_coeff.keys()).issubset(set(self.rew_coeff.keys()))
             self.rew_coeff.update(rew_coeff)
         for key in self.rew_coeff.keys():
             self.rew_coeff[key] = float(self.rew_coeff[key])
-
+        
         orig_keys = list(rew_coeff_orig.keys())
         # Checking to make sure we didn't provide some false rew_coeffs (for example by misspelling one of the params)
         assert np.all([key in orig_keys for key in self.rew_coeff.keys()])
@@ -984,22 +845,15 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         if self.spec is None:
             self.spec = gym_reg.EnvSpec(id='Quadrotor-v0', max_episode_steps=self.ep_len)
-
+        
         # Always call Serializable constructor last
         Serializable.quick_init(self, locals())
-
-    def sample_goals(self):
-        self.goals[0] = np.array([np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0), np.random.uniform(0.5, 2.0)])
-
-        for i in range(1, self.num_goals):
-            self.goals[i] = self.sample_goal(self.goals[i-1])
 
     def save_dyn_params(self, filename):
         import yaml
         with open(filename, 'w') as yaml_file:
             def numpy_convert(key, item):
                 return str(item)
-
             self.dynamics_params_converted = copy.deepcopy(self.dynamics_params)
             walk_dict(self.dynamics_params_converted, numpy_convert)
             yaml_file.write(yaml.dump(self.dynamics_params_converted, default_flow_style=False))
@@ -1017,16 +871,16 @@ class QuadrotorEnv(gym.Env, Serializable):
         else:
             raise ValueError("ERROR: QuadEnv: sense_noise parameter is of unknown type: " + str(sense_noise))
 
+
     def update_dynamics(self, dynamics_params):
         ################################################################################
         ## DYNAMICS
         ## Then loading the dynamics
         self.dynamics_params = dynamics_params
-        self.dynamics = QuadrotorDynamics(model_params=dynamics_params,
-                                          dynamics_steps_num=self.sim_steps, room_box=self.room_box,
-                                          dim_mode=self.dim_mode,
-                                          gravity=self.gravity)
-
+        self.dynamics = QuadrotorDynamics(model_params=dynamics_params, 
+                        dynamics_steps_num=self.sim_steps, room_box=self.room_box, dim_mode=self.dim_mode,
+                        gravity=self.gravity, dynamics_simplification=self.dynamics_simplification)
+        
         if self.verbose:
             print("#################################################")
             print("Dynamics params loaded:")
@@ -1043,9 +897,9 @@ class QuadrotorEnv(gym.Env, Serializable):
         ################################################################################
         ## CONTROL
         if self.raw_control:
-            if self.dim_mode == '1D':  # Z axis only
+            if self.dim_mode == '1D': # Z axis only
                 self.controller = VerticalControl(self.dynamics, zero_action_middle=self.raw_control_zero_middle)
-            elif self.dim_mode == '2D':  # X and Z axes only
+            elif self.dim_mode == '2D': # X and Z axes only
                 self.controller = VertPlaneControl(self.dynamics, zero_action_middle=self.raw_control_zero_middle)
             elif self.dim_mode == '3D':
                 self.controller = RawControl(self.dynamics, zero_action_middle=self.raw_control_zero_middle)
@@ -1060,475 +914,55 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         ################################################################################
         ## STATE VECTOR FUNCTION
-        # if we're using more than one point, just use this one state function
-        if self.num_vis_goals > 0:
-            self.state_vector = getattr(self, "xstate_xyz_vxyz_rot_omega_reached")
-        else:
-            self.state_vector = getattr(self, "state_" + self.obs_repr)
+        self.state_vector = getattr(get_state, "state_" + self.obs_repr)
 
-    ## NOTE: the state_* methods are static because otherwise getattr memorizes self
-    @staticmethod
-    def state_xyz_vxyz_rot_omega(self):
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        # return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, (pos[2],)])
-        return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega])
+    
 
-    @staticmethod
-    def state_xyz_vxyz_rot_omega_h(self):
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, (pos[2],)])
-        # return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega])
-
-    @staticmethod
-    def state_xyzr_vxyzr_rot_omega(self):
-        """
-        xyz and Vxyz are given in a body frame
-        """
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        e_xyz_rel = self.dynamics.rot.T @ (pos - self.goal[:3])
-        vel_rel = self.dynamics.rot.T @ vel
-        return np.concatenate([e_xyz_rel, vel_rel, rot.flatten(), omega])
-
-    @staticmethod
-    def state_xyzr_vxyzr_rot_omega_h(self):
-        """
-        xyz and Vxyz are given in a body frame
-        """
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        e_xyz_rel = self.dynamics.rot.T @ (pos - self.goal[:3])
-        vel_rel = self.dynamics.rot.T @ vel
-        return np.concatenate([e_xyz_rel, vel_rel, rot.flatten(), omega, (pos[2],)])
-
-    @staticmethod
-    def state_xyz_vxyz_rot_omega_acc_act(self):
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        # return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, (pos[2],)])
-        return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, acc, self.actions[1]])
-
-    @staticmethod
-    def state_xyz_vxyz_rot_omega_act(self):
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        # return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, (pos[2],)])
-        return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, self.actions[1]])
-
-    @staticmethod
-    def state_xyz_vxyz_quat_omega(self):
-        self.quat = R2quat(self.dynamics.rot)
-        pos, vel, quat, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.quat,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        return np.concatenate([pos - self.goal[:3], vel, quat, omega])
-
-    @staticmethod
-    def state_xyzr_vxyzr_quat_omega(self):
-        """
-        xyz and Vxyz are given in a body frame
-        """
-        self.quat = R2quat(self.dynamics.rot)
-        pos, vel, quat, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.quat,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        e_xyz_rel = self.dynamics.rot.T @ (pos - self.goal[:3])
-        vel_rel = self.dynamics.rot.T @ vel
-        return np.concatenate([e_xyz_rel, vel_rel, quat, omega])
-
-    @staticmethod
-    def state_xyzr_vxyzr_quat_omega_h(self):
-        """
-        xyz and Vxyz are given in a body frame
-        """
-        self.quat = R2quat(self.dynamics.rot)
-        pos, vel, quat, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.quat,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        e_xyz_rel = self.dynamics.rot.T @ (pos - self.goal[:3])
-        vel_rel = self.dynamics.rot.T @ vel
-        return np.concatenate([e_xyz_rel, vel_rel, quat, omega, (pos[2],)])
-
-    @staticmethod
-    def state_xyz_vxyz_euler_omega(self):
-        self.euler = t3d.euler.mat2euler(self.dynamics.rot)
-        pos, vel, quat, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-        return np.concatenate([pos - self.goal[:3], vel, euler, omega])
-
-    @staticmethod
-    def state_xyz_vxyz_rot_omega_reached(self):
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-
-        return np.concatenate([pos - self.goal[:3], vel, rot.flatten(), omega, [int(self.reached)]])
-
-    @staticmethod
-    def xstate_xyz_vxyz_rot_omega_reached(self):
-        pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
-
-        # add num_vis_goals number of distances and flags into array
-        state = np.empty( [self.num_vis_goals, 3], dtype=np.float32)
-
-        for i in range(self.num_vis_goals):
-            # TODO: need to keep track of which goals we're looking at
-            state[i] = pos - self.goals[i]
-        
-        state = np.concatenate([state.flatten(), vel, rot.flatten(), omega, self.flags])
-
-        return state
-
-    def get_observation_space(self):
+    def make_observation_space(self):
         self.wall_offset = 0.3
+        self.obs_space_low_high = {
+            "xyz": [-(self.room_box[1] - self.room_box[0]), self.room_box[1] - self.room_box[0]],
+            "xyzr": [-(self.room_box[1] - self.room_box[0]), self.room_box[1] - self.room_box[0]], 
+            "vxyz": [-self.dynamics.vxyz_max * np.ones(3), self.dynamics.vxyz_max * np.ones(3)],
+            "vxyzr": [-self.dynamics.vxyz_max * np.ones(3), self.dynamics.vxyz_max * np.ones(3)],
+            "acc": [-self.dynamics.acc_max * np.ones(3), self.dynamics.acc_max * np.ones(3)],
+            "R": [-np.ones(9), np.ones(9)], 
+            "omega": [-self.dynamics.omega_max * np.ones(3), self.dynamics.omega_max * np.ones(3)], 
+            "t2w": [0. * np.ones(1), 5.* np.ones(1)], 
+            "t2t": [0. * np.ones(1), 1.* np.ones(1)], 
+            "h": [0.* np.ones(1), self.room_box[1][2]* np.ones(1)],
+            "act": [np.zeros(4), np.ones(4)],
+            "quat": [-np.ones(4), np.ones(4)],
+            "euler": [-np.pi * np.ones(3), np.pi * np.ones(3)],
+            "reached": [0. * np.ones(1), 1. * np.ones(1)]
+        }
+        self.obs_comp_names = list(self.obs_space_low_high.keys())
+        self.obs_comp_sizes = [self.obs_space_low_high[name][1].size for name in self.obs_comp_names]
 
-        # if the first character is the number of visible points
-        # keep this first, otherwise next if statement will eval to true even if using multiple points
-        #TODO: assuming that we're also using reached flags right now
-
-        if self.obs_repr[0].isdigit():
-            # each visible point/goal will have 3 values
-            self.obs_comp_sizes = [3] * self.num_vis_goals
-            # velocity, rotation and omega
-            self.obs_comp_sizes.extend([3, 9, 3])
-            # 1d flag for each visible point
-            self.obs_comp_sizes.extend([1] * self.num_vis_goals)
-
-            self.obs_comp_names = ["xyz"] * self.num_vis_goals
-            self.obs_comp_names.extend(["Vxyz", "R", "Omega"])
-            # flag for each visible point
-            self.obs_comp_names.extend(["reached"] * self.num_vis_goals)
-
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            for i in range(self.num_vis_goals):
-                obs_high[i*3: i*3 + 3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-                obs_low[i*3: i*3 + 3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # reached
-            # at the end of the array, put in the flags
-            for i in range(18, 18 + self.num_vis_goals):
-                obs_high[i] = 1
-                obs_low[i] = 0
-
-
-        elif self.obs_repr == 'xyz_vxyz_rot_omega_reached':
-            self.obs_comp_sizes = [3, 3, 9, 3, 1]
-            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "reached"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # reached
-            obs_high[18] = 1
-            obs_low[18] = 0
-
-
-        elif self.obs_repr == "xyz_vxyz_rot_omega" or self.obs_repr == "xyzr_vxyzr_rot_omega":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 9, 3]
-            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # z - distance to ground
-            # obs_high[-1] = self.room_box[1][2]
-            # obs_low[-1] = self.room_box[0][2]
-
-            # # xyz room constraints
-            # obs_high[18:21] = self.room_box[1] - self.wall_offset
-            # obs_low[18:21]  = self.room_box[0] + self.wall_offset
-
-        elif self.obs_repr == "xyz_vxyz_rot_omega_h" or self.obs_repr == "xyzr_vxyzr_rot_omega_h":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 9, 3, 1]
-            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "h"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # h - distance to ground
-            obs_high[-1] = self.room_box[1][2]
-            obs_low[-1] = self.room_box[0][2]
-
-        elif self.obs_repr == "xyz_vxyz_rot_omega_acc_act":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 9, 3, 3, 4]
-            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "Acc", "Act"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # Acc
-            obs_high[18:21] = self.dynamics.acc_max * obs_high[18:21]
-            obs_low[18:21] = self.dynamics.acc_max * obs_low[18:21]
-
-            # Action
-            obs_high[21:25] = self.action_space.high
-            obs_low[21:25] = self.action_space.low
-
-        elif self.obs_repr == "xyz_vxyz_rot_omega_act":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 9, 3, 4]
-            self.obs_comp_names = ["xyz", "Vxyz", "R", "Omega", "Act"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # R
-            # indx range: 6:15
-
-            # Omega
-            obs_high[15:18] = self.dynamics.omega_max * obs_high[15:18]
-            obs_low[15:18] = self.dynamics.omega_max * obs_low[15:18]
-
-            # Action
-            obs_high[18:22] = self.action_space.high
-            obs_low[18:22] = self.action_space.low
-
-        elif self.obs_repr == "xyz_vxyz_euler_omega":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 3, 3]
-            self.obs_comp_names = ["xyz", "Vxyz", "euler", "Omega"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # Euler angles
-            obs_high[6:9] = np.pi * obs_high[6:9]
-            obs_low[6:9] = np.pi * obs_low[6:9]
-
-            # Omega
-            obs_high[9:12] = self.dynamics.omega_max * obs_high[9:12]
-            obs_low[9:12] = self.dynamics.omega_max * obs_low[9:12]
-
-            # z - distance to ground
-            # obs_high[-1] = self.room_box[1][2]
-            # obs_low[-1] = self.room_box[0][2]
-
-        elif self.obs_repr == "xyz_vxyz_quat_omega" or self.obs_repr == "xyzr_vxyzr_quat_omega":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 4, 3]
-            self.obs_comp_names = ["xyz", "Vxyz", "quat", "Omega"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # Quat
-            # indx range: 6:9
-
-            # Omega
-            obs_high[9:12] = self.dynamics.omega_max * obs_high[9:12]
-            obs_low[9:12] = self.dynamics.omega_max * obs_low[9:12]
-
-            # z - distance to ground
-            # obs_high[-1] = self.room_box[1][2]
-            # obs_low[-1] = self.room_box[0][2]
-
-        elif self.obs_repr == "xyzr_vxyzr_quat_omega_h":
-            ## Creating observation space
-            # pos, vel, rot, rot vel
-            self.obs_comp_sizes = [3, 3, 4, 3, 1]
-            self.obs_comp_names = ["xyz", "Vxyz", "quat", "Omega", "h"]
-            obs_dim = np.sum(self.obs_comp_sizes)
-            obs_high = np.ones(obs_dim)
-            obs_low = -np.ones(obs_dim)
-
-            # xyz room constraints
-            obs_high[0:3] = self.room_box[1] - self.room_box[0]  # i.e. full room size
-            obs_low[0:3] = -obs_high[0:3]
-
-            # Vxyz
-            obs_high[3:6] = self.dynamics.vxyz_max * obs_high[3:6]
-            obs_low[3:6] = self.dynamics.vxyz_max * obs_low[3:6]
-
-            # Quat
-            # indx range: 6:9
-
-            # Omega
-            obs_high[9:12] = self.dynamics.omega_max * obs_high[9:12]
-            obs_low[9:12] = self.dynamics.omega_max * obs_low[9:12]
-
-            # h - distance to ground
-            obs_high[-1] = self.room_box[1][2]
-            obs_low[-1] = self.room_box[0][2]
-
+        obs_comps = self.obs_repr.split("_")
+        
+        obs_low, obs_high = [], []
+        for comp in obs_comps:
+            if comp == 'nxyz':
+                obs_low.extend([self.obs_space_low_high['xyz'][0]] * self.num_goals)
+                obs_high.extend([self.obs_space_low_high['xyz'][1]] * self.num_goals)
+            elif comp == 'reached':
+                obs_low.extend([self.obs_space_low_high[comp][0]] * self.num_goals)
+                obs_high.extend([self.obs_space_low_high[comp][1]] * self.num_goals)
+            else:
+                obs_low.append(self.obs_space_low_high[comp][0])
+                obs_high.append(self.obs_space_low_high[comp][1])
+        obs_low = np.concatenate(obs_low)
+        obs_high = np.concatenate(obs_high)
+        
+        self.obs_comp_sizes_dict, self.obs_comp_indx, self.obs_comp_end = {}, {}, []
+        end_indx = 0
+        for obs_i, obs_name in enumerate(self.obs_comp_names):
+            end_indx += self.obs_comp_sizes[obs_i]
+            self.obs_comp_sizes_dict[obs_name] = self.obs_comp_sizes[obs_i]
+            self.obs_comp_indx[obs_name] = obs_i
+            self.obs_comp_end.append(end_indx)
+            
         self.observation_space = spaces.Box(obs_low, obs_high, dtype=np.float32)
         return self.observation_space
 
@@ -1542,22 +976,29 @@ class QuadrotorEnv(gym.Env, Serializable):
         # print('actions_norm: ', np.linalg.norm(self.actions[0]-self.actions[1]))
 
         pos, vel, rot, omega, acc = self.sense_noise.add_noise(
-            pos=self.dynamics.pos,
-            vel=self.dynamics.vel,
-            rot=self.dynamics.rot,
-            omega=self.dynamics.omega,
-            acc=self.dynamics.accelerometer,
-            dt=self.dt
-        )
+                    pos=self.dynamics.pos,
+                    vel=self.dynamics.vel,
+                    rot=self.dynamics.rot,
+                    omega=self.dynamics.omega,
+                    acc=self.dynamics.accelerometer,
+                    dt=self.dt
+                )
         # print("accelerations:", self.dynamics.accelerometer, "noise_raio:", np.abs(self.dynamics.accelerometer-acc)/np.abs(self.dynamics.accelerometer))
+
+        if self.excite and self.tick % 5 == 0:
+            ## change the goal every 5 time step
+            self.goal = np.concatenate([
+                np.random.uniform(low=-0.5, high=0.5, size=(2,)),
+                np.random.uniform(low=1.5, high=2.5, size=(1,))
+            ])
 
         # if not self.crashed:
         # print('goal: ', self.goal, 'goal_type: ', type(self.goal))
         self.controller.step_func(dynamics=self.dynamics,
-                                  action=action,
-                                  goal=self.goal,
-                                  dt=self.dt,
-                                  observation=np.expand_dims(self.state_vector(self), axis=0))
+                                action=action,
+                                goal=self.goal,
+                                dt=self.dt,
+                                observation=np.expand_dims(self.state_vector(self), axis=0))
         # self.oracle.step(self.dynamics, self.goal, self.dt)
         # self.scene.update_state(self.dynamics, self.goal)
 
@@ -1566,106 +1007,106 @@ class QuadrotorEnv(gym.Env, Serializable):
         else:
             self.crashed = self.dynamics.pos[2] <= self.dynamics.arm
         self.crashed = self.crashed or not np.array_equal(self.dynamics.pos,
-                                                          np.clip(self.dynamics.pos,
-                                                                  a_min=self.room_box[0],
-                                                                  a_max=self.room_box[1]))
-        
-        ## multiple points
-
-        if self.num_vis_goals > 1 and not self.flags[self.curr_goal]:
-            self.flags[self.curr_goal] = np.linalg.norm(self.dynamics.pos - self.goals[self.curr_goal]) <= GOAL_TOLERANCE
-        
-        # one point at a time
-
-        elif self.num_vis_goals <= 1 and not self.reached:
-            self.reached = np.linalg.norm(self.dynamics.pos - self.goal[:3]) <= GOAL_TOLERANCE
+                                                      np.clip(self.dynamics.pos,
+                                                              a_min=self.room_box[0],
+                                                              a_max=self.room_box[1]))
 
         self.time_remain = self.ep_len - self.tick
-        reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, self.goals, action, self.dt, self.crashed,
-                                                   self.reached, self.time_remain,
-                                                   rew_coeff=self.rew_coeff, action_prev=self.actions[1],flags=self.flags)
-        
-        if self.flags[self.curr_goal] and self.curr_goal < self.num_goals:
-                print("====== changing goal ======")
-                self.curr_goal += 1
-                self.goal = self.goals[self.curr_goal]
-                self.scene.update_state(self.dynamics, self.goal)
-
-        # TODO: for now we're assuming num_goals = num_vis_goals. update this later for 
-        # when this isnt the case
-        
-        if self.reached and self.num_vis_goals <= 1:
-            print("reached = true")
-            self.goal = sample_goal(self.goal)
-            print(self.goal)
-            self.reached = False
-        
+        reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed, self.time_remain, 
+                            rew_coeff=self.rew_coeff, action_prev=self.actions[1])
         self.tick += 1
-        done = self.tick > self.ep_len  # or self.crashed
+        done = self.tick > self.ep_len #or self.crashed
         sv = self.state_vector(self)
-
+        
         self.traj_count += int(done)
-        # print('state', sv, 'goal', self.goal)
-        # print('state', sv)
-        # print('vel', sv[3], sv[4], sv[5])
-        # print(sv, reward, done, rew_info)
-        return sv, reward, done, {'rewards': rew_info}
+        
+        ## TODO: OPTIMIZATION: sv_comp should be a dictionary formed when state() function is called
+        sv_comp = np.split(sv, self.obs_comp_end[:-1], axis=0)
+        obs_comp = {
+            "xyz": [sv_comp[self.obs_comp_indx["xyz"]]],
+            "vxyz": [sv_comp[self.obs_comp_indx["vxyz"]]],
+            "omega": [sv_comp[self.obs_comp_indx["omega"]]],
+            "omegaDot": self.dynamics.omega_dot,    # roll angular acceleration
+            "R": [sv_comp[self.obs_comp_indx["R"]]],
+            "R22": [self.dynamics.rot[2,2]],
+            "act": [action],
+            "clippedAct": [np.clip(self.controller.action, a_min=0., a_max=1.)],
+            "filteredAct": [self.dynamics.thrust_cmds_damp],
+            "torque": [self.dynamics.torque],
+            "torqueAct": [self.dynamics.prop_ccw * self.dynamics.thrust_cmds_damp],
+        }
+
+        dyn_params = {
+            "t2w": self.dynamics.thrust_to_weight,
+            "t2t": self.dynamics.torque_to_thrust,
+            "t2i" : self.dynamics.torque_to_inertia,
+            "inertia": [self.dynamics.inertia],
+            "maxThrust": [np.mean(self.dynamics.thrust_max)],
+            "grav": [GRAV],
+            "dt": [self.dt * self.sim_steps],
+        }
+
+        # print(sv, obs_comp, dyn_params, self.obs_comp_sizes)      
+        return sv, reward, done, {'rewards': rew_info, "obs_comp": obs_comp, "dyn_params": dyn_params}
 
     def resample_dynamics(self):
         """
         Allows manual dynamics resampling when needed.
-        WARNING:
+        WARNING: 
             - Randomization dyring an episode is not supported
             - MUST call reset() after this function
         """
-        if self.dynamics_params_def is None:
-            self.dynamics_params = self.dyn_sampler()
-        else:
-            ## Generating new params
-            self.dynamics_params = perturb_dyn_parameters(
-                params=copy.deepcopy(self.dynamics_params_def),
-                noise_params=self.dyn_randomization_params
-            )
+        ## Getting base parameters (could also be random parameters)
+        self.dynamics_params = self.dyn_base_sampler.sample()
+        
+        ## Now, updating if we are providing modifications
+        if self.dynamics_change is not None:
+            dict_update_existing(self.dynamics_params, self.dynamics_change)
+
+        ## Applying sampler 1
+        if self.dyn_sampler_1 is not None:
+            self.dynamics_params = self.dyn_sampler_1.sample(self.dynamics_params)
+
+        ## Applying sampler 2
+        if self.dyn_sampler_2 is not None:
+            self.dynamics_params = self.dyn_sampler_2.sample(self.dynamics_params)
+        
+        ## Checking that quad params make sense
+        quad_rand.check_quad_param_limits(self.dynamics_params)
+
         ## Updating params
         self.update_dynamics(dynamics_params=self.dynamics_params)
 
+
     def _reset(self):
-        ## I have to update state vector
+        ## I have to update state vector 
         ##############################################################
-        ## DYNAMICS RANDOMIZATION AND UPDATE
+        ## DYNAMICS RANDOMIZATION AND UPDATE       
         if self.dynamics_randomize_every is not None and \
-                                (self.traj_count + 1) % (self.dynamics_randomize_every) == 0:
-            self.resample_dynamics()
+           (self.traj_count + 1) % (self.dynamics_randomize_every) == 0:
+           
+           self.resample_dynamics()
 
         ##############################################################
         ## VISUALIZATION
         if self.scene is None:
             self.scene = Quadrotor3DScene(model=self.dynamics.model,
-                                          w=640, h=480, resizable=True, obstacles=self.obstacles,
-                                          viewpoint=self.viewpoint)
+                w=640, h=480, resizable=True, obstacles=self.obstacles, viewpoint=self.viewpoint)
         else:
             self.scene.update_model(self.dynamics.model)
 
         ##############################################################
         ## GOAL
-        # if self.resample_goal:
-        #     self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
-        # else:
-        #     self.goal = np.array([0., 0., 2.])
-        assert(self.num_vis_goals > 1)
-        
-        if self.num_vis_goals > 1:
-            
-            epsilon_0 = np.inf
-            epsilon_1 = np.inf
-            
-            self.sample_goals()
-            self.flags = np.zeros([self.num_vis_goals])
-            self.goal = self.goals[0]
-
-        
-        
-        self.curr_goal = 0
+        if self.num_goals == 1:
+            if self.resample_goal:
+                self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
+            else:
+                self.goal = np.array([0., 0., 2.])
+        else:
+            if self.resample_goal:
+                self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
+            else:
+                self.goal = np.array([0., 0., 2.])
 
         ## CURRICULUM (NOT REALLY NEEDED ANYMORE)
         # from 0.5 to 10 after 100k episodes (a form of curriculum)
@@ -1677,10 +1118,10 @@ class QuadrotorEnv(gym.Env, Serializable):
             x, y = self.goal[0], self.goal[1]
         elif self.dim_mode == '2D':
             y = self.goal[1]
-        # Since being near the groud means crash we have to start above
-        if z < 0.25: z = 0.25
+        #Since being near the groud means crash we have to start above
+        if z < 0.25 : z = 0.25 
         pos = npa(x, y, z)
-
+        
         ##############################################################
         ## INIT STATE
         ## Initializing rotation and velocities
@@ -1692,19 +1133,14 @@ class QuadrotorEnv(gym.Env, Serializable):
                 omega = npa(0, self.max_init_omega * np.random.rand(), 0)
                 vel = self.max_init_vel * np.random.rand(3)
                 vel[1] = 0.
-                c, s, theta = np.cos(theta), np.sin(theta), np.pi * np.random.rand()
+                theta = np.pi * np.random.rand()
+                c, s = np.cos(theta), np.sin(theta)
                 rotation = np.array(((c, 0., -s), (0., 1., 0.), (s, 0., c)))
             else:
                 # It already sets the state internally
-                _, vel, rotation, omega = self.dynamics.random_state(box=self.room_size, vel_max=self.max_init_vel,
-                                                                     omega_max=self.max_init_omega)
-                # _, vel, rotation, omega = self.dynamics.pitch_roll_restricted_random_state(
-                #         box=self.room_size,
-                #         vel_max=self.max_init_vel,
-                #         omega_max=self.max_init_omega,
-                #         pitch_max=self.pitch_max,
-                #         roll_max=self.roll_max,
-                #         yaw_max=self.yaw_max)
+                _, vel, rotation, omega = self.dynamics.random_state(
+                        box=self.room_size, vel_max=self.max_init_vel, omega_max=self.max_init_omega
+                    )
         else:
             ## INIT HORIZONTALLY WITH 0 VEL and OMEGA
             vel, omega = npa(0, 0, 0), npa(0, 0, 0)
@@ -1714,7 +1150,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             else:
                 # make sure we're sort of pointing towards goal (for mellinger controller)
                 rotation = randyaw()
-                while np.dot(rotation[:, 0], to_xyhat(-pos)) < 0.5:
+                while np.dot(rotation[:,0], to_xyhat(-pos)) < 0.5:
                     rotation = randyaw()
 
         # Setting the generated state
@@ -1730,95 +1166,55 @@ class QuadrotorEnv(gym.Env, Serializable):
         # Reseting some internal state (counters, etc)
         self.crashed = False
         self.tick = 0
-        self.actions = [np.zeros([4, ]), np.zeros([4, ])]
-        self.reached = False
+        self.actions = [np.zeros([4,]), np.zeros([4,])]
 
         state = self.state_vector(self)
         return state
 
-    def sample_goal(self, prev_point):
-        # R = (x - x0)^2 + (y - y0)^2 + (z - z0)^2
-        # z = +/- sqrt( R - (x-x0)^2 - (y-y0)^2 ) + z0
-
-        x0 = prev_point[0]
-        y0 = prev_point[1]
-        z0 = prev_point[2]
-
-        newX = np.random.uniform( max(self.room_box[0][0], x0 - self.point_distance), 
-                                    min(self.room_box[1][0], x0 + self.point_distance))
-
-        newY = np.random.uniform( max(self.room_box[0][1], y0 - self.point_distance),
-                                    min(self.room_box[1][1], y0 + self.point_distance))
-        
-        sq = self.point_distance - (newX - x0) ** (2) - (newY - y0) ** (2)
-        
-        assert(sq >= 0)
-        sq = np.sqrt(sq)
-
-        if z0 - sq < 0:
-            newZ = z0 + sq
-        else:
-            pickOne = np.random.choice([-1,1])
-            newZ = z0 + pickOne * sq
-
-        if newZ < self.room_box[0][2] or newZ >= self.room_box[1][2]:
-            return self.sample_goal(prev_point) # if we're out of room bounds, try again
-        
-        return np.array([newX, newY, newZ])
-
-    #return np.array([0., 0., np.random.uniform(0.5, 10.0)])
-    #return np.array([np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0), np.random.uniform(0.5, 10.0)])
-
     def _render(self, mode='human', close=False):
         return self.scene.render_chase(dynamics=self.dynamics, goal=self.goal, mode=mode)
-
+    
     def reset(self):
         return self._reset()
 
     def render(self, mode='human', **kwargs):
         return self._render(mode, **kwargs)
-
+    
     def step(self, action):
         return self._step(action)
 
-
 class DummyPolicy(object):
     def __init__(self, dt=0.01, switch_time=2.5):
-        self.action = np.zeros([4, ])
+        self.action = np.zeros([4,])
         self.dt = 0.
-
+    
     def step(self, x):
         return self.action
-
     def reset(self):
         pass
-
 
 class UpDownPolicy(object):
     def __init__(self, dt=0.01, switch_time=2.5):
         self.t = 0
-        self.dt = dt
+        self.dt=dt
         self.switch_time = switch_time
-        self.action_up = np.ones([4, ])
+        self.action_up =  np.ones([4,])
         self.action_up[:2] = 0.
-        self.action_down = np.zeros([4, ])
+        self.action_down =  np.zeros([4,])
         self.action_down[:2] = 1.
-
+    
     def step(self, x):
         self.t += self.dt
         if self.t < self.switch_time:
             return self.action_up
         else:
             return self.action_down
-
     def reset(self):
         self.t = 0.
 
-
-def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
-                 render=True, traj_num=10, plot_step=None, plot_dyn_change=True, plot_thrusts=False,
-                 sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_rot_omega",
-                 csv_filename=None):
+def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None, 
+    render=True, traj_num=10, plot_step=None, plot_dyn_change=True, plot_thrusts=False,
+    sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_rot_omega", num_goals=1, goal_dist=None, csv_filename=None):
     import tqdm
     #############################
     # Init plottting
@@ -1835,30 +1231,38 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
     plot_obs = False
 
     if policy_type == "mellinger":
-        raw_control = False
-        raw_control_zero_middle = True
-        policy = DummyPolicy()  # since internal Mellinger takes care of the policy
+        raw_control=False
+        raw_control_zero_middle=True
+        policy = DummyPolicy() #since internal Mellinger takes care of the policy
     elif policy_type == "updown":
-        raw_control = True
-        raw_control_zero_middle = False
+        raw_control=True
+        raw_control_zero_middle=False
         policy = UpDownPolicy()
 
-    env = QuadrotorEnv(dynamics_params=quad, raw_control=raw_control, raw_control_zero_middle=raw_control_zero_middle,
-                       dynamics_randomize_every=dyn_randomize_every,
-                       dynamics_randomization_ratio=dyn_randomization_ratio,
-                       sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr)
+    sampler_1 = None
+    if dyn_randomization_ratio is not None:
+        sampler_1 = {
+            "type": "RelativeSampler",
+            "noise_ratio": dyn_randomization_ratio,
+            "sampler": "normal"
+        }
 
-    policy.dt = 1. / env.control_freq
+    env = QuadrotorEnv(dynamics_params=quad, raw_control=raw_control, raw_control_zero_middle=raw_control_zero_middle, 
+        dynamics_randomize_every=dyn_randomize_every, dyn_sampler_1=sampler_1,
+        sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr, num_goals=num_goals, goal_dist=goal_dist)
+
+
+    policy.dt = 1./ env.control_freq
 
     env.max_episode_steps = time_limit
     print('Reseting env ...')
-
+    print("Obs repr: ", env.obs_repr)
     try:
-        print('Observation space:', env.observation_space.low, env.observation_space.high)
-        print('Action space:', env.action_space.low, env.action_space.high)
+        print('Observation space:', env.observation_space.low, env.observation_space.high, "size:", env.observation_space.high.size)
+        print('Action space:', env.action_space.low, env.action_space.high, "size:", env.action_space.high.size)
     except:
-        print('Observation space:', env.observation_space.spaces[0].low, env.observation_space[0].spaces[0].high)
-        print('Action space:', env.action_space[0].spaces[0].low, env.action_space[0].spaces[0].high)
+        print('Observation space:', env.observation_space.spaces[0].low, env.observation_space[0].spaces[0].high, "size:", env.observation_space[0].spaces[0].high.size)
+        print('Action space:', env.action_space[0].spaces[0].low, env.action_space[0].spaces[0].high, "size:", env.action_space[0].spaces[0].high.size)
     # input('Press any key to continue ...')
 
     ## Collected statistics for dynamics
@@ -1869,7 +1273,8 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
         "torque_to_thrust",
         "thrust_noise_ratio",
         "vel_damp",
-        "damp_omega_quadratic"
+        "damp_omega_quadratic",
+        "torque_to_inertia"
     ]
 
     dyn_param_stats = [[] for i in dyn_param_names]
@@ -1901,13 +1306,13 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
             if render and (t % render_each == 0): env.render()
             action = policy.step(s)
             s, r, done, info = env.step(action)
-
+            
             actions.append(action)
             thrusts.append(env.dynamics.thrust_cmds_damp)
             observations.append(s)
             # print('Step: ', t, ' Obs:', s)
             quat = R2quat(rot=s[6:15])
-            csv_data.append(np.concatenate([np.array([1.0 / env.control_freq * t]), s[0:3], quat]))
+            csv_data.append(np.concatenate([np.array([1.0/env.control_freq * t]), s[0:3], quat]))
 
             if plot_step is not None and t % plot_step == 0:
                 plt.clf()
@@ -1920,7 +1325,7 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
                         plt.plot(observations_arr[:, dim])
                     plt.legend([str(x) for x in range(observations_arr.shape[1])])
 
-                plt.pause(0.05)  # have to pause otherwise does not draw
+                plt.pause(0.05) #have to pause otherwise does not draw
                 plt.draw()
 
             if done: break
@@ -1932,12 +1337,12 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
             actions = np.array(actions)
             thrusts = np.array(thrusts)
             for i in range(4):
-                plt.plot(ep_time, actions[:, i], label="Thrust desired %d" % i)
-                plt.plot(ep_time, thrusts[:, i], label="Thrust produced %d" % i)
+                plt.plot(ep_time, actions[:,i], label="Thrust desired %d" % i)
+                plt.plot(ep_time, thrusts[:,i], label="Thrust produced %d" % i)
             plt.legend()
             plt.show(block=False)
             input("Press Enter to continue...")
-
+        
         if csv_filename is not None:
             import csv
             with open(csv_filename, mode="w") as csv_file:
@@ -1945,13 +1350,14 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
                 for row in csv_data:
                     csv_writer.writerow([i for i in row])
 
+
     if plot_dyn_change:
         dyn_par_normvar = []
         dyn_par_means = []
         dyn_par_var = []
         plt.figure(2, figsize=(10, 10))
         for par_i, par in enumerate(dyn_param_stats):
-            plt.subplot(3, 3, par_i + 1)
+            plt.subplot(3, 3, par_i+1)
             par = np.array(par)
 
             ## Compute stats
@@ -1968,9 +1374,9 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
             # plt.title(dyn_param_names[par_i] + "\n Normvar: %s" % str(dyn_par_normvar[-1]))
             plt.title(dyn_param_names[par_i])
             print(dyn_param_names[par_i], "NormVar: ", dyn_par_normvar[-1])
-
+    
     print("##############################################################")
-    print("Total time: ", time.time() - start_time)
+    print("Total time: ", time.time() - start_time )
 
     # print('Rollouts are done!')
     # plt.pause(2.0)
@@ -1980,111 +1386,223 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
         input("Press Enter to continue...")
 
 
-# the nubmer of visible points will be represented in a state by 
-# #xyz... where # is the number of points
-def get_num_visible_points(obs_rep_input):
-    return int(obs_rep_input[0])
+def benchmark(quad, dyn_randomize_every=None, dyn_randomization_ratio=None, 
+    render=True, traj_num=10, plot_step=None, plot_dyn_change=True, plot_thrusts=False,
+    sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_R_omega_act", num_goals=1, goal_dist=None, csv_filename=None):
+    import tqdm
+    rollouts_num = traj_num
+
+    if policy_type == "mellinger":
+        raw_control=False
+        raw_control_zero_middle=True
+        policy = DummyPolicy() #since internal Mellinger takes care of the policy
+    elif policy_type == "updown":
+        raw_control=True
+        raw_control_zero_middle=False
+        policy = UpDownPolicy()
+
+    sampler_1 = None
+    if dyn_randomization_ratio is not None:
+        sampler_1 = {
+            "type": "RelativeSampler",
+            "noise_ratio": dyn_randomization_ratio,
+            "sampler": "normal"
+        }
+
+
+    env = QuadrotorEnv(dynamics_params=quad, raw_control=raw_control, raw_control_zero_middle=raw_control_zero_middle, 
+        dynamics_randomize_every=dyn_randomize_every, dyn_sampler_1=sampler_1,
+        sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr, num_goals=num_goals, goal_dist=goal_dist)
+
+
+    policy.dt = 1./ env.control_freq
+    render = False
+    render_each = 2
+
+    print('Reseting env ...')
+    print("Obs repr: ", env.obs_repr)
+    try:
+        print('Observation space:', env.observation_space.low, env.observation_space.high, "size:", env.observation_space.high.size)
+        print('Action space:', env.action_space.low, env.action_space.high, "size:", env.observation_space.high.size)
+    except:
+        print('Observation space:', env.observation_space.spaces[0].low, env.observation_space[0].spaces[0].high, "size:", env.observation_space[0].spaces[0].high.size)
+        print('Action space:', env.action_space[0].spaces[0].low, env.action_space[0].spaces[0].high, "size:", env.action_space[0].spaces[0].high.size)
+
+    ## Collected statistics for dynamics
+    dyn_param_names = [
+        "mass",
+        "inertia",
+        "thrust_to_weight",
+        "torque_to_thrust",
+        "thrust_noise_ratio",
+        "vel_damp",
+        "damp_omega_quadratic",
+        "torque_to_inertia"
+    ]
+
+    dyn_param_stats = [[] for i in dyn_param_names]
+
+    start_time = time.time()
+    for rollouts_id in tqdm.tqdm(range(rollouts_num)):
+        s = env.reset()
+        policy.reset()
+
+        t = 0
+        while True:
+            if render and (t % render_each == 0): env.render()
+            action = policy.step(s)
+            s, r, done, info = env.step(action)
+            if done: break
+    
+    print("##############################################################")
+    print("Total time: ", time.time() - start_time)
+    input("Press Enter to continue...")
 
 def main(argv):
     # parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        '-m', "--mode",
+        '-m',"--mode",
         default="mellinger",
         help="Test mode: "
              "mellinger - rollout with mellinger controller"
              "updown - rollout with UpDown controller (to test step responses)"
     )
     parser.add_argument(
-        '-q', "--quad",
-        default="defaultquad",
-        help="Quadrotor model to use: \n" +
-             "- defaultquad \n" +
-             "- crazyflie \n" +
-             "- random"
+        '-q',"--quad",
+        default="DefaultQuad",
+        help="Quadrotor model to use: \n" + 
+            "- DefaultQuad \n" + 
+            "- Crazyflie \n" +
+            "- MediumQuad \n" +
+            "- RandomQuad"
     )
     parser.add_argument(
-        '-dre', "--dyn_randomize_every",
+        '-dre',"--dyn_randomize_every",
         type=int,
         help="How often (in terms of trajectories) to perform randomization"
     )
     parser.add_argument(
-        '-drr', "--dyn_randomization_ratio",
+        '-drr',"--dyn_randomization_ratio",
         type=float,
-        default=0.5,
+        default=None,
         help="Randomization ratio for random sampling of dynamics parameters"
     )
     parser.add_argument(
-        '-r', "--render",
+        '-r',"--render",
         action="store_false",
         help="Use this flag to turn off rendering"
     )
     parser.add_argument(
-        '-trj', "--traj_num",
+        '-trj',"--traj_num",
         type=int,
         default=10,
         help="Number of trajectories to run"
     )
     parser.add_argument(
-        '-plt', "--plot_step",
+        '-plt',"--plot_step",
         type=int,
         help="Plot step"
     )
     parser.add_argument(
-        '-pltdyn', "--plot_dyn_change",
+        '-pltdyn',"--plot_dyn_change",
         action="store_true",
         help="Plot the dynamics change from trajectory to trajectory?"
     )
     parser.add_argument(
-        '-pltact', "--plot_actions",
+        '-pltact',"--plot_actions",
         action="store_true",
         help="Plot actions commanded and thrusts produced after damping"
     )
     parser.add_argument(
-        '-sn', "--sense_noise",
+        '-sn',"--sense_noise",
         action="store_false",
         help="Add sensor noise? Use this flag to turn the noise off"
     )
     parser.add_argument(
-        '-irs', "--init_random_state",
+        '-irs',"--init_random_state",
         action="store_true",
         help="Add sensor noise?"
     )
     parser.add_argument(
-        '-csv', "--csv_filename",
+        '-csv',"--csv_filename",
         help="Filename for qudrotor data"
     )
     parser.add_argument(
-        '-o', "--obs_repr",
-        default="xyz_vxyz_rot_omega_acc_act",
+        '-o',"--obs_repr",
+        default="xyz_vxyz_R_omega_act",
         help="State components. Options:\n" +
-             "xyz_vxyz_rot_omega" +
-             "xyz_vxyz_rot_omega_act" +
-             "xyz_vxyz_rot_omega_acc_act"
+             "xyz_vxyz_R_omega" +
+             "xyz_vxyz_R_omega_act" +
+             "xyz_vxyz_R_omega_acc_act" 
     )
+    parser.add_argument(
+        '-ng',"--num_goals",
+        type=int,
+        default=1,
+        help="Number of goals. Options:\n" +
+             "1" +
+             "2" +
+             "3" 
+    )
+    parser.add_argument(
+        '-gd',"--goal_dist",
+        type=int,
+        default=0.5,
+        help="Distance between each goal. Options:\n" +
+             "0.5" +
+             "1.0" +
+             "2.0" 
+    )
+    parser.add_argument(
+        '-b',"--benchmark",
+        action="store_true",
+        help="Simple benchmark, i.e. running time" 
+    )
+
     args = parser.parse_args()
 
-    if args.sense_noise:
-        sense_noise = "default"
-    else:
-        sense_noise = None
+    if args.sense_noise: sense_noise="default"
+    else: sense_noise=None
 
-    print('Running test rollout ...')
-    test_rollout(
-        quad=args.quad,
-        dyn_randomize_every=args.dyn_randomize_every,
-        dyn_randomization_ratio=args.dyn_randomization_ratio,
-        render=args.render,
-        traj_num=args.traj_num,
-        plot_step=args.plot_step,
-        plot_dyn_change=args.plot_dyn_change,
-        plot_thrusts=args.plot_actions,
-        sense_noise=sense_noise,
-        policy_type=args.mode,
-        init_random_state=args.init_random_state,
-        obs_repr=args.obs_repr,
-        csv_filename=args.csv_filename,
-    )
+    if args.benchmark:
+        print('Running benchmark ...')
+        benchmark(
+            quad=args.quad, 
+            dyn_randomize_every=args.dyn_randomize_every,
+            dyn_randomization_ratio=args.dyn_randomization_ratio,
+            render=args.render,
+            traj_num=args.traj_num,
+            plot_step=args.plot_step,
+            plot_dyn_change=args.plot_dyn_change,
+            plot_thrusts=args.plot_actions,
+            sense_noise=sense_noise,
+            policy_type=args.mode,
+            init_random_state=args.init_random_state,
+            obs_repr=args.obs_repr,
+            csv_filename=args.csv_filename,
+            num_goals=args.num_goals, 
+            goal_dist=args.goal_dist
+        )
+    else:
+        print('Running test rollout ...')
+        test_rollout(
+            quad=args.quad, 
+            dyn_randomize_every=args.dyn_randomize_every,
+            dyn_randomization_ratio=args.dyn_randomization_ratio,
+            render=args.render,
+            traj_num=args.traj_num,
+            plot_step=args.plot_step,
+            plot_dyn_change=args.plot_dyn_change,
+            plot_thrusts=args.plot_actions,
+            sense_noise=sense_noise,
+            policy_type=args.mode,
+            init_random_state=args.init_random_state,
+            obs_repr=args.obs_repr,
+            csv_filename=args.csv_filename,
+            num_goals=args.num_goals,
+            goal_dist=args.goal_dist
+        )
 
 
 if __name__ == '__main__':
