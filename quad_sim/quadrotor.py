@@ -547,12 +547,46 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
-def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, rew_coeff, action_prev):
+def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reached, time_remain, rew_coeff, action_prev):
     ##################################################
+    assert len(goal) % 3 == 0
+    num_goals = len(goal)//3
+    
+    loss_pos = []
     ## log to create a sharp peak at the goal
-    dist = np.linalg.norm(goal[:3] - dynamics.pos)
-    loss_pos = rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
+    for i in range(num_goals):
+        dist = np.linalg.norm(goal[i*3:i*3+3] - dynamics.pos)
+        loss_pos.append((rew_coeff["multi_goal_scaling"] ** i) * rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist))
     # loss_pos = dist
+    #print("Before Reached ", loss_pos)
+    if rew_type == 'default' or rew_type == 'all_goal_active':
+        if reached is not None:
+            # activate loss_pos[i] only if all previous goals are reached
+            for i in range(num_goals):
+                loss_pos[i] *= np.prod(reached[:i])
+        
+        print("After Reached ", loss_pos)
+    
+    if rew_type == 'current_goal_active':
+        if reached is not None:
+            # activate loss_pos[i] for the next goal only
+            idx = num_goals - 1
+            for i in range(num_goals):
+                if reached[i] == 0:
+                    idx = i
+                    break
+                
+            for i in range(num_goals):
+                if i != idx:
+                    loss_pos[i] = 0
+        
+        print("After Reached ", loss_pos)
+    
+    if rew_type == 'epsilon':
+        if reached is not None:
+            # activate loss_pos[i] only if all previous goals are reached
+            for i in range(num_goals):
+                loss_pos[i] *= np.prod(reached[:i])
 
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
@@ -609,7 +643,7 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, re
     # rew_info = {'rew_crash': -loss_crash, 'rew_altitude': -loss_alt, 'rew_action': -loss_effort, 'rew_pos': -loss_pos, 'rew_vel_proj': -loss_vel_proj}
 
     reward = -dt * np.sum([
-        loss_pos, 
+        np.sum(loss_pos),
         loss_effort, 
         loss_crash, 
         loss_orient,
@@ -621,24 +655,28 @@ def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, re
         # loss_spin_xy,
         loss_act_change,
         loss_vel
-        ])
+    ])
     
-
     rew_info = {
-    "rew_main": -loss_pos,
-    'rew_pos': -loss_pos, 
-    'rew_action': -loss_effort, 
-    'rew_crash': -loss_crash, 
-    "rew_orient": -loss_orient,
-    "rew_yaw": -loss_yaw,
-    "rew_rot": -loss_rotation,
-    "rew_attitude": -loss_attitude,
-    "rew_spin": -loss_spin,
-    # "rew_spin_z": -loss_spin_z,
-    # "rew_spin_xy": -loss_spin_xy,
-    # "rew_act_change": -loss_act_change,
-    "rew_vel": -loss_vel
+        "rew_main": -np.sum(loss_pos),
+        'rew_action': -loss_effort, 
+        'rew_crash': -loss_crash, 
+        "rew_orient": -loss_orient,
+        "rew_yaw": -loss_yaw,
+        "rew_rot": -loss_rotation,
+        "rew_attitude": -loss_attitude,
+        "rew_spin": -loss_spin,
+        # "rew_spin_z": -loss_spin_z,
+        # "rew_spin_xy": -loss_spin_xy,
+        # "rew_act_change": -loss_act_change,
+        "rew_vel": -loss_vel
     }
+
+    for i in range(num_goals):
+        rew_info["loss_pos_" + str(i)] = loss_pos[i]
+
+        if reached is not None:
+            rew_info["reached_" + str(i)] = reached[i]
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
     # print('pos', dynamics.pos)
@@ -665,8 +703,8 @@ class QuadrotorEnv(gym.Env, Serializable):
     def __init__(self, dynamics_params="DefaultQuad", dynamics_change=None, 
                 dynamics_randomize_every=None, dyn_sampler_1=None, dyn_sampler_2=None,
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
-                obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
-                rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
+                obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
+                rew_type="current_goal_active", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
                 t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False):
         np.seterr(under='ignore')
         """
@@ -713,10 +751,15 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.update_sense_noise(sense_noise=sense_noise)
         self.gravity = gravity
         self.resample_goal = resample_goal
+        self.goal_tolerance = goal_tolerance
         # multiple goals
         self.num_goals = num_goals
         self.goal_dist = goal_dist
-        self.reached = np.zeros(self.num_goals)
+
+        if 'reached' in self.obs_repr:
+            self.reached = np.zeros(self.num_goals)
+        else:
+            self.reached = None
 
         if self.num_goals > 1:
             assert 'nxyz' in self.obs_repr, "If using multiple goals, use nxyz in obs_repr."
@@ -815,8 +858,10 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         #########################################
         ## REWARDS PARAMS
+        self.rew_type = rew_type
         self.rew_coeff = {
-            "pos": 1., "pos_offset": 0.1, "pos_log_weight": 1., "pos_linear_weight": 0.1,
+            "pos": 1., "pos_offset": 0.1, "pos_log_weight": 0., "pos_linear_weight": 1.,
+            "multi_goal_scaling": 2.,
             "effort": 0.01, 
             "action_change": 0.,
             "crash": 1., 
@@ -1013,8 +1058,6 @@ class QuadrotorEnv(gym.Env, Serializable):
                 np.random.uniform(low=1.5, high=2.5, size=(1,))
             ])
 
-        # if not self.crashed:
-        # print('goal: ', self.goal, 'goal_type: ', type(self.goal))
         self.controller.step_func(dynamics=self.dynamics,
                                 action=action,
                                 goal=self.goal,
@@ -1031,9 +1074,16 @@ class QuadrotorEnv(gym.Env, Serializable):
                                                       np.clip(self.dynamics.pos,
                                                               a_min=self.room_box[0],
                                                               a_max=self.room_box[1]))
-
+        
+        # only set reached if it was in obs_repr
+        if self.reached is not None:
+            for i in range(self.num_goals):
+                # if all previous flags are true and current flag is false
+                if np.prod(self.reached[:i]) and not self.reached[i]:
+                    self.reached[i] = np.linalg.norm(self.dynamics.pos - self.goal[i*3:i*3+3]) <= self.goal_tolerance
+            
         self.time_remain = self.ep_len - self.tick
-        reward, rew_info = compute_reward_weighted(self.dynamics, self.goal, action, self.dt, self.crashed, self.time_remain, 
+        reward, rew_info = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, action, self.dt, self.crashed, self.reached, self.time_remain, 
                             rew_coeff=self.rew_coeff, action_prev=self.actions[1])
         self.tick += 1
         done = self.tick > self.ep_len #or self.crashed
@@ -1126,6 +1176,9 @@ class QuadrotorEnv(gym.Env, Serializable):
         if self.num_goals > 1:
             for _ in range(self.num_goals-1):
                 self.goal = np.concatenate((self.goal, self.sample_goal_at_dist(self.goal[-3:])))
+        
+        if self.reached is not None:
+            self.reached = np.zeros(self.num_goals)
 
         ## CURRICULUM (NOT REALLY NEEDED ANYMORE)
         # from 0.5 to 10 after 100k episodes (a form of curriculum)

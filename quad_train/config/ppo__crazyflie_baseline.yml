@@ -5,6 +5,7 @@ variant:
     obs_repr : nxyz_vxyz_R_omega_reached"
     num_goals: 2
     goal_dist: 0.5
+    goal_tolerance: 0.05
     dynamics_params: crazyflie
     dynamics_change:
       noise:
@@ -17,10 +18,12 @@ variant:
     sim_steps: 2
     ep_time: 7
     sense_noise: default
+    rew_type: default # all_goal_active/current_goal_active/epsilon
     rew_coeff:
       pos: 1. 
       pos_log_weight: 0.
       pos_linear_weight: 1.
+      multi_goal_scaling: 2.
       effort: 0.05
       spin: 0.1
       vel: 0.0
