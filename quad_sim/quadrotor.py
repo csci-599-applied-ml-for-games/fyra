@@ -976,7 +976,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             and 0.5 <= new_point[2] <= (self.room_box[1][2] - self.wall_offset)):
             return new_point
         else:
-            return self.sample_point_at_dist(point)
+            return self.sample_goal_at_dist(point)
 
     def make_observation_space(self):
         self.wall_offset = 0.3
