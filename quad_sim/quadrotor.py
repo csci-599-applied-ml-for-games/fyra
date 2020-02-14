@@ -583,6 +583,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reach
             # activate loss_pos[i] only if all previous goals are reached
             for i in range(num_goals):
                 loss_pos[i] *= np.prod(reached[:i])
+                # loss_pos[i] =
 
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
@@ -976,7 +977,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             and 0.5 <= new_point[2] <= (self.room_box[1][2] - self.wall_offset)):
             return new_point
         else:
-            return self.sample_point_at_dist(point)
+            return self.sample_goal_at_dist(point)
 
     def make_observation_space(self):
         self.wall_offset = 0.3
