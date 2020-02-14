@@ -550,7 +550,7 @@ class QuadrotorDynamics(object):
 def compute_reward_weighted(dynamics, goal, action, dt, crashed, time_remain, rew_coeff, action_prev):
     ##################################################
     ## log to create a sharp peak at the goal
-    dist = np.linalg.norm(goal - dynamics.pos)
+    dist = np.linalg.norm(goal[:3] - dynamics.pos)
     loss_pos = rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist)
     # loss_pos = dist
 
@@ -662,7 +662,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         'video.frames_per_second' : 50
     }
 
-    def __init__(self, dynamics_params="defaultquad", dynamics_change=None, 
+    def __init__(self, dynamics_params="DefaultQuad", dynamics_change=None, 
                 dynamics_randomize_every=None, dyn_sampler_1=None, dyn_sampler_2=None,
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
                 obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
@@ -917,6 +917,25 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.state_vector = getattr(get_state, "state_" + self.obs_repr)
 
     
+    def sample_goal_at_dist(self, point):
+        assert len(point) == 3
+        
+        # refer http://mathworld.wolfram.com/SpherePointPicking.html
+        z = np.random.uniform(-1, 1)
+        theta = np.random.uniform(0, 2*np.pi)
+        r = np.sqrt(1 - z**2)
+        x = r * np.cos(theta)
+        y = r * np.sin(theta)
+
+        new_point = np.array([point[0] + self.goal_dist * x, point[1] + self.goal_dist * y, point[2] + self.goal_dist * z])
+
+        # check if new_point is within room constraints
+        if ((self.room_box[0][0] + self.wall_offset) <= new_point[0] <= (self.room_box[1][0] - self.wall_offset)
+            and (self.room_box[0][1] + self.wall_offset <= new_point[1]) <= (self.room_box[1][1] - self.wall_offset)
+            and 0.5 <= new_point[2] <= (self.room_box[1][2] - self.wall_offset)):
+            return new_point
+        else:
+            return self.sample_point_at_dist(point)
 
     def make_observation_space(self):
         self.wall_offset = 0.3
@@ -986,6 +1005,8 @@ class QuadrotorEnv(gym.Env, Serializable):
         # print("accelerations:", self.dynamics.accelerometer, "noise_raio:", np.abs(self.dynamics.accelerometer-acc)/np.abs(self.dynamics.accelerometer))
 
         if self.excite and self.tick % 5 == 0:
+            assert self.num_goals == 1, "excite is not yet compatible with multiple goals"
+
             ## change the goal every 5 time step
             self.goal = np.concatenate([
                 np.random.uniform(low=-0.5, high=0.5, size=(2,)),
@@ -1097,22 +1118,20 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         ##############################################################
         ## GOAL
-        if self.num_goals == 1:
-            if self.resample_goal:
-                self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
-            else:
-                self.goal = np.array([0., 0., 2.])
+        if self.resample_goal:
+            self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
         else:
-            if self.resample_goal:
-                self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
-            else:
-                self.goal = np.array([0., 0., 2.])
+            self.goal = np.array([0., 0., 2.])
+
+        if self.num_goals > 1:
+            for _ in range(self.num_goals-1):
+                self.goal = np.concatenate((self.goal, self.sample_goal_at_dist(self.goal[-3:])))
 
         ## CURRICULUM (NOT REALLY NEEDED ANYMORE)
         # from 0.5 to 10 after 100k episodes (a form of curriculum)
         if self.box < 10:
             self.box = self.box * self.box_scale
-        x, y, z = self.np_random.uniform(-self.box, self.box, size=(3,)) + self.goal
+        x, y, z = self.np_random.uniform(-self.box, self.box, size=(3,)) + self.goal[:3]
 
         if self.dim_mode == '1D':
             x, y = self.goal[0], self.goal[1]

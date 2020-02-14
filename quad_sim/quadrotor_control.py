@@ -303,7 +303,7 @@ class NonlinearPositionController(object):
 
     # modifies the dynamics in place.
     def step(self, dynamics, goal, dt, action=None, observation=None):
-        to_goal = goal - dynamics.pos
+        to_goal = goal[:3] - dynamics.pos
         goal_dist = norm(to_goal)
         e_p = -clamp_norm(to_goal, 4.0)
         e_v = dynamics.vel
