@@ -1241,7 +1241,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         return state
 
     def _render(self, mode='human', close=False):
-        return self.scene.render_chase(dynamics=self.dynamics, goal=self.goal, mode=mode)
+        return self.scene.render_chase(dynamics=self.dynamics, goals=self.goal, mode=mode)
     
     def reset(self):
         return self._reset()

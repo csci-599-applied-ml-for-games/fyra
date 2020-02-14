@@ -40,8 +40,8 @@ def test_rollout(
         params = joblib.load(param_file)
 
         #env = params['env'].env
-        target_goals = [[2., 1., 2.], [3, 2., 3.]]
-        env = QuadrotorEnv(num_goals=2,goals=target_goals)
+        #target_goals = [[2., 1., 2.], [3, 2., 3.]]
+        env = QuadrotorEnv(num_goals=2)
         policy = params['policy']
         
         ## modify the environment
@@ -101,7 +101,7 @@ def test_rollout(
                 # =================================
                 if render and (t % render_each == 0): env.render()
 
-                if traj_file != None or target_goals.size > 0:
+                if traj_file != None or len(target_goals) > 0:
                 # if traj_ptr < traj.shape[0]:
                     # if t % traj_freq == 0:
                     #    env.goal = traj[traj_ptr][:3]
