@@ -700,7 +700,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                 dynamics_randomize_every=None, dyn_sampler_1=None, dyn_sampler_2=None,
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
                 obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
-                rew_type="current_goal_active", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
+                rew_type="default", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
                 t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False):
         np.seterr(under='ignore')
         """
