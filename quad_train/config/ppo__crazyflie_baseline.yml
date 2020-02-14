@@ -2,11 +2,11 @@ seed: 1
 variant:
   env: QuadrotorEnv
   env_param:
-    obs_repr : nxyz_vxyz_R_omega_reached"
+    obs_repr : nxyz_vxyz_R_omega_reached
     num_goals: 2
     goal_dist: 0.5
     goal_tolerance: 0.05
-    dynamics_params: crazyflie
+    dynamics_params: Crazyflie
     dynamics_change:
       noise:
         thrust_noise_ratio: 0.05

@@ -564,8 +564,6 @@ def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reach
             # activate loss_pos[i] only if all previous goals are reached
             for i in range(num_goals):
                 loss_pos[i] *= np.prod(reached[:i])
-        
-        print("After Reached ", loss_pos)
     
     if rew_type == 'current_goal_active':
         if reached is not None:
@@ -579,8 +577,6 @@ def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reach
             for i in range(num_goals):
                 if i != idx:
                     loss_pos[i] = 0
-        
-        print("After Reached ", loss_pos)
     
     if rew_type == 'epsilon':
         if reached is not None:
