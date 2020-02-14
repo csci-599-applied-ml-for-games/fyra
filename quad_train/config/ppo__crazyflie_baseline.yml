@@ -18,7 +18,7 @@ variant:
     sim_steps: 2
     ep_time: 7
     sense_noise: default
-    rew_type: default # all_goal_active/current_goal_active/epsilon
+    rew_type: default # all_goal_active # current_goal_active # epsilon
     rew_coeff:
       pos: 1. 
       pos_log_weight: 0.
