@@ -81,7 +81,7 @@ def test_rollout(
             policy.reset()
             
             ## reset the goal to x:0, y:0 z:0
-            env.goal = np.array([0., 0., 1])
+            # env.goal = np.array([0., 0., 1])
             
             dynamics = env.dynamics
             print("thrust to weight ratio set to: {}, and max thrust is {}".format(dynamics.thrust_to_weight, dynamics.thrust_max))
@@ -119,19 +119,19 @@ def test_rollout(
                 
                 # ========== Diagnostics ==========
                 real_pos = env.state_vector(env)
-                pos = real_pos[0:3] + env.goal
-                vel = real_pos[3:6]
-                quat = R2quat(real_pos[6:15])
+                pos = real_pos[0:3] + env.goal[0:3]
+                vel = real_pos[env.num_goals*3:env.num_goals*3+3]
+                quat = R2quat(real_pos[(env.num_goals+1)*3:(env.num_goals+1)*3+9])
                 # reformat to [x, y, z, w]
                 quat[0], quat[1], quat[2], quat[3] = quat[1], quat[2], quat[3], quat[0]
-                rpy = R2rpy(real_pos[6:15])
-                omega = real_pos[15:18]
+                rpy = R2rpy(real_pos[(env.num_goals+1)*3:(env.num_goals+1)*3+9])
+                omega = real_pos[(env.num_goals+1)*3+9:(env.num_goals+1)*3+12]
                 
                 # real_pos = np.concatenate([[t * dt * sim_steps], pos, quat, vel, omega, action])
                 # real_pos = np.concatenate([[t * dt * sim_steps], 
                 #     pos, quat, info['obs_comp']['Vxyz'][0], omega, info['obs_comp']['Act'][0], [r]])
                 real_pos = np.concatenate([[t * dt * sim_steps], 
-                    pos, rpy, vel, omega, env.goal, action, [info['rewards']['rew_pos']]])
+                    pos, rpy, vel, omega, env.goal, action, [info['rewards']['rew_main']]])
                 observations.append(real_pos)
                 
 

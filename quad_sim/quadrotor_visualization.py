@@ -158,6 +158,7 @@ class Quadrotor3DScene(object):
         self.update_goal_diameter()
         self.chase_cam.view_dist = self.diameter * 15
 
+        self.goal_arrows = []
         for _ in range(self.goal_count):
             self.create_goal(goal=(0,0,0))
         
@@ -180,7 +181,6 @@ class Quadrotor3DScene(object):
             (0.85, 0.55, 0), r3d.sphere(self.goal_diameter/2, 18)))
         
         goal_arr_len, goal_arr_r, goal_arr_sect  = 1.5 * self.goal_diameter, 0.02 * self.goal_diameter, 10
-        self.goal_arrows = []
 
         self.goal_arrows_rot = []
         self.goal_arrows_rot.append(np.array([[0,0,1],[0,1,0],[-1,0,0]]))
@@ -196,12 +196,9 @@ class Quadrotor3DScene(object):
         self.goal_arrows.append(r3d.transform_and_color(
             np.eye(4), 
             (0., 0., 1.), r3d.arrow(goal_arr_r, goal_arr_len, goal_arr_sect)))
-        
-        self.goal_count+=1 
 
     def update_goal(self, goal, goal_index):
         self.goal_transforms[goal_index].set_transform(r3d.translate(goal[0:3]))
-
         self.goal_arrows[goal_index*3].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[0]))
         self.goal_arrows[goal_index*3 + 1].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[1]))
         self.goal_arrows[goal_index*3 + 2].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[2]))
@@ -298,11 +295,12 @@ class Quadrotor3DScene(object):
 
     # TODO allow resampling obstacles?
     def reset(self, goal, dynamics):
-        self.goal_count = len(goal) / 3
         assert(len(goal) % 3 == 0)
+        self.goal_count = len(goal) // 3
         self.chase_cam.reset(goal[0:3], dynamics.pos, dynamics.vel)
         self.update_state(dynamics, goal)
-
+        
+    
     def update_state(self, dynamics, goals):
         if self.scene:
             self.chase_cam.step(dynamics.pos, dynamics.vel)
