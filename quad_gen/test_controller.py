@@ -1,13 +1,13 @@
-# from quad_sim.quad_utils import R2quat
-# from quad_sim.quad_models import *
-# from quad_sim.quadrotor import QuadrotorEnv
-# from quad_sim.quadrotor_randomization import *
-# from simulators_investigation.utils import *
+from quad_sim.quad_utils import R2quat
+from quad_sim.quad_models import *
+from quad_sim.quadrotor import QuadrotorEnv
+from quad_sim.quadrotor_randomization import *
+from simulators_investigation.utils import *
 import sys
 import argparse
-# import matplotlib.pyplot as plt
-# import numpy as np
-# import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import joblib
 import os
 import time
 
@@ -41,7 +41,7 @@ def test_rollout(
 
         #env = params['env'].env
         #target_goals = [[2., 1., 2.], [3, 2., 3.]]
-        env = QuadrotorEnv(num_goals=2)
+        env = QuadrotorEnv(num_goals=2, goal_tolerance=0.15, obs_repr="nxyz_vxyz_R_omega_reached")
         policy = params['policy']
         
         ## modify the environment
@@ -134,7 +134,7 @@ def test_rollout(
                 
                 # ========== Diagnostics ==========
                 real_pos = env.state_vector(env)
-                pos = real_pos[0:3] + env.goal
+                pos = real_pos[0:3] + env.goal[:3]
                 vel = real_pos[3:6]
                 quat = R2quat(real_pos[6:15])
                 # reformat to [x, y, z, w]
