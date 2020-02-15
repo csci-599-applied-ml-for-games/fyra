@@ -92,7 +92,9 @@ class SideCamera(object):
 class Quadrotor3DScene(object):
     def __init__(self, w, h,
         quad_arm=None, model=None, obstacles=True, visible=True, resizable=True, goal_diameter=None, viewpoint='chase', obs_hw=[64,64]):
-
+        
+        self.goal_count = 0
+        self.goal_transforms = []
         self.window_target = None
         self.window_w, self.window_h = w , h
         self.resizable = resizable
@@ -156,13 +158,13 @@ class Quadrotor3DScene(object):
         self.update_goal_diameter()
         self.chase_cam.view_dist = self.diameter * 15
 
-        self.create_goal(goal=(0,0,0))
+        self.goal_arrows = []
+        for _ in range(self.goal_count):
+            self.create_goal(goal=(0,0,0))
         
-        bodies = [r3d.BackToFront([floor, self.shadow_transform]),
-            self.goal_transform, self.quad_transform] + self.goal_arrows
+        bodies = [r3d.BackToFront([floor, self.shadow_transform])] + self.goal_transforms +  [self.quad_transform] + self.goal_arrows
         
             
-
         if self.obstacles:
             bodies += self.obstacles.bodies
 
@@ -175,11 +177,10 @@ class Quadrotor3DScene(object):
 
     def create_goal(self, goal):
         ## Goal
-        self.goal_transform = r3d.transform_and_color(np.eye(4),
-            (0.85, 0.55, 0), r3d.sphere(self.goal_diameter/2, 18))
+        self.goal_transforms.append(r3d.transform_and_color(np.eye(4),
+            (0.85, 0.55, 0), r3d.sphere(self.goal_diameter/2, 18)))
         
         goal_arr_len, goal_arr_r, goal_arr_sect  = 1.5 * self.goal_diameter, 0.02 * self.goal_diameter, 10
-        self.goal_arrows = []
 
         self.goal_arrows_rot = []
         self.goal_arrows_rot.append(np.array([[0,0,1],[0,1,0],[-1,0,0]]))
@@ -196,12 +197,11 @@ class Quadrotor3DScene(object):
             np.eye(4), 
             (0., 0., 1.), r3d.arrow(goal_arr_r, goal_arr_len, goal_arr_sect)))
 
-    def update_goal(self, goal):
-        self.goal_transform.set_transform(r3d.translate(goal[0:3]))
-
-        self.goal_arrows[0].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[0]))
-        self.goal_arrows[1].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[1]))
-        self.goal_arrows[2].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[2]))
+    def update_goal(self, goal, goal_index):
+        self.goal_transforms[goal_index].set_transform(r3d.translate(goal[0:3]))
+        self.goal_arrows[goal_index*3].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[0]))
+        self.goal_arrows[goal_index*3 + 1].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[1]))
+        self.goal_arrows[goal_index*3 + 2].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[2]))
 
 
     def update_model(self, model):
@@ -295,16 +295,20 @@ class Quadrotor3DScene(object):
 
     # TODO allow resampling obstacles?
     def reset(self, goal, dynamics):
+        assert(len(goal) % 3 == 0)
+        self.goal_count = len(goal) // 3
         self.chase_cam.reset(goal[0:3], dynamics.pos, dynamics.vel)
         self.update_state(dynamics, goal)
-
-    def update_state(self, dynamics, goal):
+        
+    
+    def update_state(self, dynamics, goals):
         if self.scene:
             self.chase_cam.step(dynamics.pos, dynamics.vel)
             self.have_state = True
             self.fpv_lookat = dynamics.look_at()
             
-            self.update_goal(goal=goal)
+            for i in range(self.goal_count):
+                self.update_goal(goal=goals[i*3:i*3+3],goal_index = i)
 
             matrix = r3d.trans_and_rot(dynamics.pos, dynamics.rot)
             self.quad_transform.set_transform_nocollide(matrix)
@@ -314,12 +318,15 @@ class Quadrotor3DScene(object):
             matrix = r3d.translate(shadow_pos)
             self.shadow_transform.set_transform_nocollide(matrix)
 
-    def render_chase(self, dynamics, goal, mode="human"):
+    def render_chase(self, dynamics, goals, mode="human"):
+        
+        assert(self.goal_count > 0)
+
         if mode == "human":
             if self.window_target is None: 
                 self.window_target = r3d.WindowTarget(self.window_w, self.window_h, resizable=self.resizable)
                 self._make_scene()
-            self.update_state(dynamics=dynamics, goal=goal)
+            self.update_state(dynamics=dynamics, goals=goals)
             self.cam3p.look_at(*self.chase_cam.look_at())
             r3d.draw(self.scene, self.cam3p, self.window_target)
             return None
@@ -327,16 +334,16 @@ class Quadrotor3DScene(object):
             if self.video_target is None:
                 self.video_target = r3d.FBOTarget(self.window_h, self.window_h)
                 self._make_scene()
-            self.update_state(dynamics=dynamics, goal=goal)
+            self.update_state(dynamics=dynamics, goals=goals)
             self.cam3p.look_at(*self.chase_cam.look_at())
             r3d.draw(self.scene, self.cam3p, self.video_target)
             return np.flipud(self.video_target.read())
 
-    def render_obs(self, dynamics, goal):
+    def render_obs(self, dynamics, goals):
         if self.obs_target is None: 
             self.obs_target = r3d.FBOTarget(self.obs_hw[0], self.obs_hw[1])
             self._make_scene()
-        self.update_state(dynamics=dynamics, goal=goal)
+        self.update_state(dynamics=dynamics, goals=goals)
         self.cam1p.look_at(*self.fpv_lookat)
         r3d.draw(self.scene, self.cam1p, self.obs_target)
         return np.flipud(self.obs_target.read())
