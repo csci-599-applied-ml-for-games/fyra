@@ -547,7 +547,7 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
-def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reached, time_remain, rew_coeff, action_prev):
+def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
@@ -565,7 +565,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reach
             for i in range(num_goals):
                 loss_pos[i] *= np.prod(reached[:i])
     
-    if rew_type == 'current_goal_active':
+    elif rew_type == 'current_goal_active':
         if reached is not None:
             # activate loss_pos[i] for the next goal only
             idx = num_goals - 1
@@ -578,11 +578,19 @@ def compute_reward_weighted(rew_type, dynamics, goal, action, dt, crashed, reach
                 if i != idx:
                     loss_pos[i] = 0
     
-    if rew_type == 'epsilon':
+    elif rew_type == 'epsilon':
         if reached is not None:
             # activate loss_pos[i] only if all previous goals are reached
             for i in range(num_goals):
                 loss_pos[i] *= np.prod(reached[:i])
+    
+    elif rew_type == 'all_goal_positive':
+        if reached is not None:
+            # activate loss_pos[i] only if all previous goals are reached
+            for i in range(num_goals):
+                loss_pos[i] *= np.prod(reached[:i])
+            for i in range(1, num_goals):
+                loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
 
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
@@ -1079,7 +1087,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                     self.reached[i] = np.linalg.norm(self.dynamics.pos - self.goal[i*3:i*3+3]) <= self.goal_tolerance
             
         self.time_remain = self.ep_len - self.tick
-        reward, rew_info = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, action, self.dt, self.crashed, self.reached, self.time_remain, 
+        reward, rew_info = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
                             rew_coeff=self.rew_coeff, action_prev=self.actions[1])
         self.tick += 1
         done = self.tick > self.ep_len #or self.crashed
