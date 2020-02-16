@@ -558,7 +558,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
     ## log to create a sharp peak at the goal
     for i in range(num_goals):
         dist.append(np.linalg.norm(goal[i*3:i*3+3] - dynamics.pos))
-        loss_pos.append((rew_coeff["multi_goal_scaling"] ** i) * rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist[i]))
+        loss_pos.append((rew_coeff["multi_goal_scaling"] ** i) * rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist[i] + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist[i]))
     # loss_pos = dist
     #print("Before Reached ", loss_pos)
     if rew_type == 'default' or rew_type == 'all_goal_active':
