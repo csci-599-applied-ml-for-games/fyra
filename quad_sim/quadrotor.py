@@ -1092,7 +1092,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         
         # only set reached if it was in obs_repr
         if self.reached is not None:
-            for i in range(self.num_goals):
+            for i in range(1, self.num_goals):
                 # if all previous flags are true and current flag is false
                 if self.reached[i-1] and not self.reached[i]:
                     self.reached[i] = np.linalg.norm(self.dynamics.pos - self.goal[i*3:i*3+3]) <= self.goal_tolerance
