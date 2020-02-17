@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 GRAV = 9.81 #default gravitational constant
 EPS = 1e-6 #small constant to avoid divisions by 0 and log(0)
+INF = 1000000000
 
 ## WARN:
 # - linearity is set to 1 always, by means of check_quad_param_limits(). 
@@ -586,7 +587,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         if reached is not None:
             # activate loss_pos[i] only if previous goal was reached
             for i in range(1, num_goals):
-                epsilon[i] = np.inf if not reached[i-1] else min(epsilon[i], dist[i])
+                epsilon[i] = INF if not reached[i-1] else min(epsilon[i], dist[i])
                 loss_pos[i] *= reached[i-1] * epsilon[i]
     
     elif rew_type == 'all_goal_positive':
@@ -882,7 +883,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             "vel": 0.}
 
         if self.rew_type == "epsilon":
-            self.epsilon = np.full(self.num_goals, np.inf)
+            self.epsilon = np.full(self.num_goals, INF)
 
         rew_coeff_orig = copy.deepcopy(self.rew_coeff)
 
@@ -1252,7 +1253,7 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         # Reseting some internal state (counters, etc)
         if self.rew_type == "epsilon":
-            self.epsilon = np.full(self.num_goals, np.inf)
+            self.epsilon = np.full(self.num_goals, INF)
         self.crashed = False
         self.tick = 0
         self.actions = [np.zeros([4,]), np.zeros([4,])]
