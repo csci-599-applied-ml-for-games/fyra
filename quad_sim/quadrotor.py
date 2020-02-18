@@ -600,13 +600,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
         for i in range(1, num_goals):
-            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
-    
-    elif rew_type == "min_dist_reached":
-        assert reached is not None
-        assert epsilon is not None
-
-        for 
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist    
 
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
@@ -697,14 +691,9 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
 
         if reached is not None:
             rew_info["reached_" + str(i)] = reached[i]
-<<<<<<< HEAD
         
         if epsilon is not None:
             rew_info["epsilon_" + str(i)] = epsilon[i]
-=======
-        if epsilon is not None:
-            rew_info["epsilon " + str(i)] = epsilon[i]
->>>>>>> 7f788226e6a94b089bc4a30c36d08ed43b9fc7b2
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
     # print('pos', dynamics.pos)
