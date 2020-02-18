@@ -884,6 +884,8 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         if self.rew_type == "epsilon":
             self.epsilon = np.full(self.num_goals, INF)
+        else:
+            self.epsilon = None
 
         rew_coeff_orig = copy.deepcopy(self.rew_coeff)
 
@@ -1254,6 +1256,9 @@ class QuadrotorEnv(gym.Env, Serializable):
         # Reseting some internal state (counters, etc)
         if self.rew_type == "epsilon":
             self.epsilon = np.full(self.num_goals, INF)
+        else:
+            self.epsilon = None
+            
         self.crashed = False
         self.tick = 0
         self.actions = [np.zeros([4,]), np.zeros([4,])]
