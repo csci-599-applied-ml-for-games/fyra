@@ -549,6 +549,10 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
+
+def get_goal_at(i, goal):
+    return goal[i*3:i*3+3]    
+
 def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, epsilon=None):
     ##################################################
     assert len(goal) % 3 == 0
@@ -558,7 +562,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
     dist = []
     ## log to create a sharp peak at the goal
     for i in range(num_goals):
-        dist.append(np.linalg.norm(goal[i*3:i*3+3] - dynamics.pos))
+        dist.append(np.linalg.norm(get_goal_at(i, goal) - dynamics.pos))
         loss_pos.append((rew_coeff["multi_goal_scaling"] ** i) * rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist[i] + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist[i]))
     # loss_pos = dist
     #print("Before Reached ", loss_pos)
@@ -567,8 +571,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
             assert reached is not None
         
         # activate loss_pos[i] only if all previous goals are reached
-        for i in range(1, num_goals):
-            loss_pos[i] *= reached[i-1]
+        for i in range(num_goals):
+                loss_pos[i] *= np.prod(reached[:i])
     
     elif rew_type == 'current_goal_active':
         assert reached is not None
@@ -589,9 +593,10 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         assert epsilon is not None
         
         # activate loss_pos[i] only if previous goal was reached
-        for i in range(1, num_goals):
-            epsilon[i] = INF if not reached[i-1] else min(epsilon[i], dist[i])
-            loss_pos[i] *= reached[i-1] * epsilon[i]
+        for i in range(num_goals):
+            if np.prod(reached[:i]):
+                epsilon[i] = min(epsilon[i], dist[i])
+            loss_pos[i] *=  np.prod(reached[:i])  * epsilon[i]
     
     elif rew_type == 'all_goal_positive':
         assert reached is not None
@@ -1101,10 +1106,10 @@ class QuadrotorEnv(gym.Env, Serializable):
         
         # only set reached if it was in obs_repr
         if self.reached is not None:
-            for i in range(1, self.num_goals):
+            for i in range( self.num_goals):
                 # if all previous flags are true and current flag is false
-                if self.reached[i-1] and not self.reached[i]:
-                    self.reached[i] = np.linalg.norm(self.dynamics.pos - self.goal[i*3:i*3+3]) <= self.goal_tolerance
+                if np.prod(self.reached[:i]) and not self.reached[i]:
+                    self.reached[i] = np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)) <= self.goal_tolerance
             
         self.time_remain = self.ep_len - self.tick
         reward, rew_info, self.epsilon = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
