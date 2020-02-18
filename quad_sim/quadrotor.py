@@ -687,6 +687,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
 
         if reached is not None:
             rew_info["reached_" + str(i)] = reached[i]
+        if epsilon is not None:
             rew_info["epsilon " + str(i)] = epsilon[i]
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
@@ -1258,7 +1259,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.epsilon = np.full(self.num_goals, INF)
         else:
             self.epsilon = None
-            
+
         self.crashed = False
         self.tick = 0
         self.actions = [np.zeros([4,]), np.zeros([4,])]
