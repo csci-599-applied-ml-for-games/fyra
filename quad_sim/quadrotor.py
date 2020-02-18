@@ -565,7 +565,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         dist.append(np.linalg.norm(get_goal_at(i, goal) - dynamics.pos))
         loss_pos.append((rew_coeff["multi_goal_scaling"] ** i) * rew_coeff["pos"] * (rew_coeff["pos_log_weight"] * np.log(dist[i] + rew_coeff["pos_offset"]) + rew_coeff["pos_linear_weight"] * dist[i]))
     # loss_pos = dist
-    #print("Before Reached ", loss_pos)
+
     if rew_type == 'default' or rew_type == 'all_goal_active':
         if num_goals > 1:
             assert reached is not None
@@ -605,10 +605,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
         for i in range(1, num_goals):
-            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist    
-
-    # dynamics_pos = dynamics.pos
-    # print('dynamics.pos', dynamics.pos)
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
 
     ##################################################
     ## penalize altitude above this threshold
