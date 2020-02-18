@@ -549,7 +549,7 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
-def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached=None, time_remain, rew_coeff, action_prev, epsilon=None):
+def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, epsilon=None):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
