@@ -108,8 +108,8 @@ def test_rollout(
                     #    traj_ptr += 5   ## need to adjust this parameter according to the trajectory file frequency
                     state = env.state_vector(env)
                     reached = state[-1]
-
-                    if reached:
+                    
+                    if t * dt >= ep_time:
                         # update goal
                         done = True
 

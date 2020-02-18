@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 GRAV = 9.81 #default gravitational constant
 EPS = 1e-6 #small constant to avoid divisions by 0 and log(0)
+INF = 1000000000
 
 ## WARN:
 # - linearity is set to 1 always, by means of check_quad_param_limits(). 
@@ -589,7 +590,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         
         # activate loss_pos[i] only if previous goal was reached
         for i in range(1, num_goals):
-            epsilon[i] = np.inf if not reached[i-1] else min(epsilon[i], dist[i])
+            epsilon[i] = INF if not reached[i-1] else min(epsilon[i], dist[i])
             loss_pos[i] *= reached[i-1] * epsilon[i]
     
     elif rew_type == 'all_goal_positive':
@@ -696,9 +697,14 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
 
         if reached is not None:
             rew_info["reached_" + str(i)] = reached[i]
+<<<<<<< HEAD
         
         if epsilon is not None:
             rew_info["epsilon_" + str(i)] = epsilon[i]
+=======
+        if epsilon is not None:
+            rew_info["epsilon " + str(i)] = epsilon[i]
+>>>>>>> 7f788226e6a94b089bc4a30c36d08ed43b9fc7b2
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
     # print('pos', dynamics.pos)
@@ -894,7 +900,9 @@ class QuadrotorEnv(gym.Env, Serializable):
             "vel": 0.}
 
         if self.rew_type == "epsilon":
-            self.epsilon = np.full(self.num_goals, np.inf)
+            self.epsilon = np.full(self.num_goals, INF)
+        else:
+            self.epsilon = None
 
         rew_coeff_orig = copy.deepcopy(self.rew_coeff)
 
@@ -1104,7 +1112,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         
         # only set reached if it was in obs_repr
         if self.reached is not None:
-            for i in range(self.num_goals):
+            for i in range(1, self.num_goals):
                 # if all previous flags are true and current flag is false
                 if self.reached[i-1] and not self.reached[i]:
                     self.reached[i] = np.linalg.norm(self.dynamics.pos - self.goal[i*3:i*3+3]) <= self.goal_tolerance
@@ -1264,7 +1272,10 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         # Reseting some internal state (counters, etc)
         if self.rew_type == "epsilon":
-            self.epsilon = np.full(self.num_goals, np.inf)
+            self.epsilon = np.full(self.num_goals, INF)
+        else:
+            self.epsilon = None
+
         self.crashed = False
         self.tick = 0
         self.actions = [np.zeros([4,]), np.zeros([4,])]

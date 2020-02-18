@@ -134,7 +134,7 @@ class Quadrotor3DScene(object):
             self.goal_diameter = self.diameter
 
 
-    def _make_scene(self):
+    def _make_scene(self, create_goals=True):
         # if target is None:
         #     self.window_target = r3d.WindowTarget(self.window_w, self.window_h, resizable=self.resizable)
         #     self.obs_target = r3d.FBOTarget(self.obs_hw[0], self.obs_hw[1])
@@ -157,10 +157,12 @@ class Quadrotor3DScene(object):
 
         self.update_goal_diameter()
         self.chase_cam.view_dist = self.diameter * 15
+        
+        if create_goals:
+            self.goal_arrows = []
 
-        self.goal_arrows = []
-        for _ in range(self.goal_count):
-            self.create_goal(goal=(0,0,0))
+            for _ in range(self.goal_count):
+                self.create_goal(goal=(0,0,0))
         
         bodies = [r3d.BackToFront([floor, self.shadow_transform])] + self.goal_transforms +  [self.quad_transform] + self.goal_arrows
         
@@ -213,7 +215,7 @@ class Quadrotor3DScene(object):
             self.obs_target.finish()
             self.obs_target = None
         if self.window_target:
-            self._make_scene()
+            self._make_scene(create_goals=False)
 
     def _quadrotor_3dmodel(self, model):
         # params["body"] = {"l": 0.03, "w": 0.03, "h": 0.004, "m": 0.005}
