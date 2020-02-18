@@ -548,7 +548,7 @@ class QuadrotorDynamics(object):
 
 
 # reasonable reward function for hovering at a goal and not flying too high
-def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, epsilon=None):
+def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached=None, time_remain, rew_coeff, action_prev, epsilon=None):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
@@ -562,40 +562,50 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
     # loss_pos = dist
     #print("Before Reached ", loss_pos)
     if rew_type == 'default' or rew_type == 'all_goal_active':
-        if reached is not None:
-            # activate loss_pos[i] only if all previous goals are reached
-            for i in range(1, num_goals):
-                loss_pos[i] *= reached[i-1]
+        if num_goals > 1:
+            assert reached is not None
+        
+        # activate loss_pos[i] only if all previous goals are reached
+        for i in range(1, num_goals):
+            loss_pos[i] *= reached[i-1]
     
     elif rew_type == 'current_goal_active':
-        if reached is not None:
-            # activate loss_pos[i] for the next goal only
-            idx = num_goals - 1
-            for i in range(num_goals):
-                if reached[i] == 0:
-                    idx = i
-                    break
-                
-            for i in range(num_goals):
-                if i != idx:
-                    loss_pos[i] = 0
+        assert reached is not None
+        
+        # activate loss_pos[i] for the next goal only
+        idx = num_goals - 1
+        for i in range(num_goals):
+            if reached[i] == 0:
+                idx = i
+                break
+            
+        for i in range(num_goals):
+            if i != idx:
+                loss_pos[i] = 0
     
     elif rew_type == 'epsilon':
+        assert reached is not None
         assert epsilon is not None
         
-        if reached is not None:
-            # activate loss_pos[i] only if previous goal was reached
-            for i in range(1, num_goals):
-                epsilon[i] = np.inf if not reached[i-1] else min(epsilon[i], dist[i])
-                loss_pos[i] *= reached[i-1] * epsilon[i]
+        # activate loss_pos[i] only if previous goal was reached
+        for i in range(1, num_goals):
+            epsilon[i] = np.inf if not reached[i-1] else min(epsilon[i], dist[i])
+            loss_pos[i] *= reached[i-1] * epsilon[i]
     
     elif rew_type == 'all_goal_positive':
-        if reached is not None:
-            # activate loss_pos[i] only if all previous goals are reached
-            for i in range(num_goals):
-                loss_pos[i] *= np.prod(reached[:i])
-            for i in range(1, num_goals):
-                loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+        assert reached is not None
+        
+        # activate loss_pos[i] only if all previous goals are reached
+        for i in range(num_goals):
+            loss_pos[i] *= np.prod(reached[:i])
+        for i in range(1, num_goals):
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+    
+    elif rew_type == "min_dist_reached":
+        assert reached is not None
+        assert epsilon is not None
+
+        for 
 
     # dynamics_pos = dynamics.pos
     # print('dynamics.pos', dynamics.pos)
@@ -686,7 +696,9 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
 
         if reached is not None:
             rew_info["reached_" + str(i)] = reached[i]
-            rew_info["epsilon " + str(i)] = epsilon[i]
+        
+        if epsilon is not None:
+            rew_info["epsilon_" + str(i)] = epsilon[i]
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
     # print('pos', dynamics.pos)
