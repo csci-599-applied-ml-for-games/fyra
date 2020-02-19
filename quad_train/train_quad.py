@@ -22,14 +22,7 @@ import numpy as np
 import dateutil.tz
 import yaml
 
-import gym
 
-from garage.envs import normalize
-from garage.experiment import run_experiment
-
-# Custom stuff
-import quad_train.config.config_loader as conf
-import quad_train.misc.variants_utils as vu
 
 
 ########################################################################
@@ -47,7 +40,22 @@ parser.add_argument("--param_val", '-pv', help='task hyperparam values.'+
                     ' For adjacent params separated by double comma.' +
                     '   Ex: \"-p par1,par2 -pv pv11,pv12,,pv21,pv22\"' + 
                     '   where pv11,pv12 - par values for par1 , pv21,pv22 - par values for par2')
+parser.add_argument("--nodisp", action="store_true", help="use virtual display")
 args = parser.parse_args()
+
+if args.nodisp:
+    from pyvirtualdisplay import Display
+    display = Display(visible=0, size=(1400,900))
+    display.start()
+
+import gym
+
+from garage.envs import normalize
+from garage.experiment import run_experiment
+
+# Custom stuff
+import quad_train.config.config_loader as conf
+import quad_train.misc.variants_utils as vu
 
 ########################################################################
 ## PARAMETERS (non grid)

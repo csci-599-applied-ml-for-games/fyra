@@ -1,8 +1,3 @@
-from quad_sim.quad_utils import R2quat
-from quad_sim.quad_models import *
-from quad_sim.quadrotor import QuadrotorEnv
-from quad_sim.quadrotor_randomization import *
-from simulators_investigation.utils import *
 import sys
 import argparse
 import matplotlib.pyplot as plt
@@ -10,6 +5,7 @@ import numpy as np
 import joblib
 import os
 import time
+
 
 def test_rollout(
         param_file, 
@@ -25,9 +21,21 @@ def test_rollout(
         random_quad=False,  # if it's true, use what the env already has
         excite=False, # whether to perturb the quad
         save=False, 
-        plot=False
+        plot=False,
+        nodisp=False,
     ):
+
+    # moved these here so that pyvirtualdisplay is imported before them
+    
+    from quad_sim.quad_utils import R2quat
+    from quad_sim.quad_models import crazyflie_params
+    from quad_sim.quadrotor import QuadrotorEnv
+    from quad_sim.quadrotor_randomization import R2quat
+    from simulators_investigation.utils import rpy2R, R2rpy
     import tqdm
+
+
+
 
     if traj_file != None:
         print("Reading trajectory...")
@@ -285,7 +293,17 @@ def main(argv):
         help='whether to record flight'
     )    
 
+    parser.add_argument(
+        '--nodisp',
+        action='store_true',
+        help='use virtual display, render won\'t show'
+    )
     args = parser.parse_args()
+
+    if args.nodisp:
+        from pyvirtualdisplay import Display
+        display = Display(visible=0, size=(1400,900))
+        display.start()
 
     print('Running test rollout...')
     test_rollout(

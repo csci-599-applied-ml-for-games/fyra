@@ -591,12 +591,21 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
     elif rew_type == 'epsilon':
         assert reached is not None
         assert epsilon is not None
-        
+
+        # positive reward coefficients for reaching goal i
+
+        scaling_coeffs = [4, 8]
+
         # activate loss_pos[i] only if previous goal was reached
         for i in range(num_goals):
-            if np.prod(reached[:i]):
-                epsilon[i] = min(epsilon[i], dist[i])
-            loss_pos[i] *=  np.prod(reached[:i])  * epsilon[i]
+            # if np.prod(reached[:i]):
+            #     epsilon[i] = min(epsilon[i], dist[i])
+            if reached[i]:
+                loss_pos[i] = 0
+            else:
+                loss_pos[i] *=  np.prod(reached[:i]) # * epsilon[i]
+            
+            loss_pos[i] -= np.dot(reached, scaling_coeffs) / num_goals
     
     elif rew_type == 'all_goal_positive':
         assert reached is not None
@@ -606,6 +615,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
             loss_pos[i] *= np.prod(reached[:i])
         for i in range(1, num_goals):
             loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+    else:
+        raise NotImplementedError("rew_type " + rew_type + " is either invalid or has not been implemented")
 
     ##################################################
     ## penalize altitude above this threshold
