@@ -607,6 +607,14 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
             
             loss_pos[i] -= np.dot(reached, scaling_coeffs) / num_goals
     
+    elif rew_type == "continuous":
+        assert reached is not None
+
+        for i in range(num_goals):
+            loss_pos[i] *= np.prod(reached[:i])
+            if i >= 1 and reached[i-1]:
+                loss_pos[i] -= goal_dist * rew_coeff["pos_linear_weight"]
+    
     elif rew_type == 'all_goal_positive':
         assert reached is not None
         
