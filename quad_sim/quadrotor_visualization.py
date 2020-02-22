@@ -94,6 +94,7 @@ class Quadrotor3DScene(object):
         quad_arm=None, model=None, obstacles=True, visible=True, resizable=True, goal_diameter=None, viewpoint='chase', obs_hw=[64,64]):
         
         self.goal_count = 0
+        # self.curr_goal = 0
         self.goal_transforms = []
         self.window_target = None
         self.window_w, self.window_h = w , h
@@ -205,6 +206,8 @@ class Quadrotor3DScene(object):
         self.goal_arrows[goal_index*3 + 1].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[1]))
         self.goal_arrows[goal_index*3 + 2].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[2]))
 
+    def update_goal_color(self, goal, goal_index):
+        self.goal_transforms[goal_index].children[0].set_rgb(28.0/255.0, 235.0/255.0, 63.0/255.0)
 
     def update_model(self, model):
         self.model = model
@@ -298,12 +301,15 @@ class Quadrotor3DScene(object):
     # TODO allow resampling obstacles?
     def reset(self, goal, dynamics):
         assert(len(goal) % 3 == 0)
+        # self.curr_goal = 0
         self.goal_count = len(goal) // 3
         self.chase_cam.reset(goal[0:3], dynamics.pos, dynamics.vel)
-        self.update_state(dynamics, goal)
+        
+        reached = np.zeros(len(goal))
+        self.update_state(dynamics, goal, reached)
         
     
-    def update_state(self, dynamics, goals):
+    def update_state(self, dynamics, goals, reached=None):
         if self.scene:
             self.chase_cam.step(dynamics.pos, dynamics.vel)
             self.have_state = True
@@ -311,6 +317,9 @@ class Quadrotor3DScene(object):
             
             for i in range(self.goal_count):
                 self.update_goal(goal=goals[i*3:i*3+3],goal_index = i)
+                
+                if reached is not None and reached[i]: # change to green
+                    self.update_goal_color(goal=goals[i*3:i*3+3], goal_index = i)
 
             matrix = r3d.trans_and_rot(dynamics.pos, dynamics.rot)
             self.quad_transform.set_transform_nocollide(matrix)
@@ -320,15 +329,14 @@ class Quadrotor3DScene(object):
             matrix = r3d.translate(shadow_pos)
             self.shadow_transform.set_transform_nocollide(matrix)
 
-    def render_chase(self, dynamics, goals, mode="human"):
+    def render_chase(self, dynamics, goals, mode="human", reached=None):
         
         assert(self.goal_count > 0)
-
         if mode == "human":
             if self.window_target is None: 
                 self.window_target = r3d.WindowTarget(self.window_w, self.window_h, resizable=self.resizable)
                 self._make_scene()
-            self.update_state(dynamics=dynamics, goals=goals)
+            self.update_state(dynamics=dynamics, goals=goals, reached=reached)
             self.cam3p.look_at(*self.chase_cam.look_at())
             r3d.draw(self.scene, self.cam3p, self.window_target)
             return None
@@ -336,7 +344,7 @@ class Quadrotor3DScene(object):
             if self.video_target is None:
                 self.video_target = r3d.FBOTarget(self.window_h, self.window_h)
                 self._make_scene()
-            self.update_state(dynamics=dynamics, goals=goals)
+            self.update_state(dynamics=dynamics, goals=goals, reached=reached)
             self.cam3p.look_at(*self.chase_cam.look_at())
             r3d.draw(self.scene, self.cam3p, self.video_target)
             return np.flipud(self.video_target.read())

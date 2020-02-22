@@ -47,9 +47,8 @@ def test_rollout(
         print("extrating parameters from file %s ..." % param_file)
         params = joblib.load(param_file)
 
-        #env = params['env'].env
-        #target_goals = [[2., 1., 2.], [3, 2., 3.]]
-        env = QuadrotorEnv(num_goals=2, goal_tolerance=0.15, obs_repr="nxyz_vxyz_R_omega_reached")
+        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.1, rew_type="epsilon")
+        # env = params['env'].env
         policy = params['policy']
         
         ## modify the environment
