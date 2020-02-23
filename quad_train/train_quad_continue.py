@@ -23,8 +23,8 @@ from garage.envs import normalize
 from garage.experiment import run_experiment
 
 # Custom stuff
-import quad_dynalearn.config.config_loader as conf
-import quad_dynalearn.misc.variants_utils as vu
+import quad_train.config.config_loader as conf
+import quad_train.misc.variants_utils as vu
 
 
 ########################################################################
@@ -43,7 +43,14 @@ parser.add_argument("--param_val", '-pv', help='task hyperparam values.'+
                     ' For adjacent params separated by double comma.' +
                     '   Ex: \"-p par1,par2 -pv pv11,pv12,,pv21,pv22\"' + 
                     '   where pv11,pv12 - par values for par1 , pv21,pv22 - par values for par2')
+parser.add_argument("--nodisp", action="store_true", help="use virtual display")
+
 args = parser.parse_args()
+
+if args.nodisp:
+    from pyvirtualdisplay import Display
+    display = Display(visible=0, size=(1400,900))
+    display.start()
 
 ########################################################################
 ## PARAMETERS (non grid)
@@ -80,10 +87,10 @@ def run_task_continue(task_param):
     from garage.tf.envs import TfEnv
     from garage.tf.policies import GaussianMLPPolicy, DeterministicMLPPolicy, GaussianGRUPolicy, GaussianLSTMPolicy
     
-    from quad_dynalearn.algos.cem import CEM
-    from quad_dynalearn.algos.cma_es import CMAES
-    from quad_dynalearn.algos.ppo import PPO
-    from quad_dynalearn.algos.trpo import TRPO
+    from quad_train.algos.cem import CEM
+    from quad_train.algos.cma_es import CMAES
+    from quad_train.algos.ppo import PPO
+    from quad_train.algos.trpo import TRPO
 
     import sys
     import os
