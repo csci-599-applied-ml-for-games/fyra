@@ -16,9 +16,9 @@ variant:
     init_random_state: True
     sim_freq: 200 #Hz
     sim_steps: 2
-    ep_time: 7
+    ep_time: 10
     sense_noise: default
-    rew_type: epsilon # all_goal_active # current_goal_active # epsilon
+    rew_type: simplified_goal #epsilon # all_goal_active # current_goal_active # epsilon
     rew_coeff:
       pos: 1. 
       pos_log_weight: 0.
@@ -32,9 +32,9 @@ variant:
       yaw: 0. 
   alg_class: PPO
   alg_param:
-    batch_size: 28000
-    max_path_length: 700
-    n_itr: 3000 #Max num of iterations
+    batch_size: 40000
+    max_path_length: 1000
+    n_itr: 5000 #Max num of iterations
     max_samples: 10000000000 #Max num of samples
     discount: 0.99
     step_size: 0.01

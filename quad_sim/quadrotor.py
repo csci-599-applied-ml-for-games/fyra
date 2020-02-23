@@ -618,7 +618,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
     # reward = -dt * np.sum([loss_pos, loss_effort, loss_alt, loss_vel_proj, loss_crash])
     # rew_info = {'rew_crash': -loss_crash, 'rew_altitude': -loss_alt, 'rew_action': -loss_effort, 'rew_pos': -loss_pos, 'rew_vel_proj': -loss_vel_proj}
 
-        if rew_type == 'default' or rew_type == 'all_goal_active':
+    if rew_type == 'default' or rew_type == 'all_goal_active':
         if num_goals > 1:
             assert reached is not None
         
@@ -1131,7 +1131,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                     self.reached[i] = np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)) <= self.goal_tolerance
         
         for i in range(self.num_goals):
-            self.min_dist_to_goal[i] = np.min(self.min_dist_to_goal[i], np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)))
+            self.min_dist_to_goal[i] = min(self.min_dist_to_goal[i], np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)))
             
         self.time_remain = self.ep_len - self.tick
         reward, rew_info = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
