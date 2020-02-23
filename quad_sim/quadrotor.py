@@ -680,7 +680,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(0, num_goals-1):
             loss_pos[i] = min_loss_pos[i] if reached[i] else loss_pos[i]
     
-    elif rew_type == "smplified_epsilon":
+    elif rew_type == "simplified_epsilon":
         assert reached is not None
         
         # activate loss_pos[i] only if all previous goals are reached
