@@ -679,6 +679,17 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         assert reached is not None
         for i in range(0, num_goals-1):
             loss_pos[i] = min_loss_pos[i] if reached[i] else loss_pos[i]
+    
+    elif rew_type == "smplified_epsilon":
+        assert reached is not None
+        
+        # activate loss_pos[i] only if all previous goals are reached
+        for i in range(num_goals):
+            loss_pos[i] *= np.prod(reached[:i])
+        for i in range(1, num_goals):
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+        for i in range(0, num_goals-1):
+            loss_pos[i] = min_loss_pos[i] if reached[i] else loss_pos[i]
 
     else:
         raise NotImplementedError("rew_type " + rew_type + " is either invalid or has not been implemented")
