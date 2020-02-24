@@ -44,6 +44,7 @@ parser.add_argument("--param_val", '-pv', help='task hyperparam values.'+
                     '   Ex: \"-p par1,par2 -pv pv11,pv12,,pv21,pv22\"' + 
                     '   where pv11,pv12 - par values for par1 , pv21,pv22 - par values for par2')
 parser.add_argument("--nodisp", action="store_true", help="use virtual display")
+parser.add_argument("--new_env", action="store_true", help="use a new environment as opposed to using the one in params.pkl")
 
 args = parser.parse_args()
 
@@ -112,9 +113,15 @@ def run_task_continue(task_param):
 
         # Unpack the snapshot
         snapshot = joblib.load(pkl_file)
+
         env = snapshot["env"]
         policy = snapshot["policy"]
         itr = snapshot["itr"]
+        
+        if args.new_env:
+            from quad_sim.quadrotor import QuadrotorEnv
+            env = TfEnv(QuadrotorEnv(**task_param["env_param"]))
+
         task_param["alg_param"]["start_itr"] = itr+1
 
         del task_param["env"]

@@ -594,7 +594,6 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         # no penalty for a goal once its been reached
 
         assert reached is not None
-        assert epsilon is not None
 
         # positive reward coefficients for reaching goal i
         scaling_coeffs = [4, 8]
