@@ -477,3 +477,16 @@ def state_nxyz_vxyz_R_omega_reached(self):
     
     error_to_goals = np.concatenate([pos - self.goal[i*3:i*3+3] for i in range(self.num_goals)])
     return np.concatenate([error_to_goals, vel, rot.flatten(), omega, self.reached])
+
+def state_nxyz_vxyz_R_omega_tick_reached(self):
+    pos, vel, rot, omega, acc = self.sense_noise.add_noise(
+        pos=self.dynamics.pos,
+        vel=self.dynamics.vel,
+        rot=self.dynamics.rot,
+        omega=self.dynamics.omega,
+        acc=self.dynamics.accelerometer,
+        dt=self.dt
+    )
+    
+    error_to_goals = np.concatenate([pos - self.goal[i*3:i*3+3] for i in range(self.num_goals)])
+    return np.concatenate([error_to_goals, vel, rot.flatten(), omega, [self.tick], self.reached])
