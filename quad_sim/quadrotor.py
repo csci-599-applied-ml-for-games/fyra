@@ -553,12 +553,13 @@ class QuadrotorDynamics(object):
 def get_goal_at(i, goal):
     return goal[i*3:i*3+3]    
 
-def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, epsilon=None):
+def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, tick=None, epsilon=None):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
     
     loss_pos = []
+    loss_tick = 0
     dist = []
     ## log to create a sharp peak at the goal
     for i in range(num_goals):
@@ -588,32 +589,36 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
             if i != idx:
                 loss_pos[i] = 0
     
-    elif rew_type == 'epsilon':
+    elif rew_type == 'positive_no_orient_no_trailing':
+        # positive reward for each goal reached, no penalty for Z orientation
+        # no penalty for a goal once its been reached
+
         assert reached is not None
         assert epsilon is not None
 
         # positive reward coefficients for reaching goal i
-
         scaling_coeffs = [4, 8]
-
-        # activate loss_pos[i] only if previous goal was reached
-        for i in range(num_goals):
-            # if np.prod(reached[:i]):
-            #     epsilon[i] = min(epsilon[i], dist[i])
+        assert num_goals == len(scaling_coeffs)
+        
+        for i in range(num_goals-1):
             if reached[i]:
-                loss_pos[i] = 0
+                loss_pos[i] = scaling_coeffs[i]
             else:
-                loss_pos[i] *=  np.prod(reached[:i]) # * epsilon[i]
-            
-            loss_pos[i] -= np.dot(reached, scaling_coeffs) / num_goals
-    
-    elif rew_type == "continuous":
+                loss_pos[i] *=  np.prod(reached[:i])
+        
+        # always hover at last goal
+        loss_pos[num_goals-1] *= np.prod(reached[:(num_goals-1)]) 
+
+    elif rew_type == "tick":
         assert reached is not None
+        # penalize for time until last goal is reached
+        if not reached[-1]:
+            loss_tick += 0.1 * tick
 
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
-            if i >= 1 and reached[i-1]:
-                loss_pos[i] -= goal_dist * rew_coeff["pos_linear_weight"]
+        for i in range(1, num_goals):
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
     
     elif rew_type == 'all_goal_positive':
         assert reached is not None
@@ -689,7 +694,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         # loss_spin_z,
         # loss_spin_xy,
         loss_act_change,
-        loss_vel
+        loss_vel,
+        loss_tick
     ])
     
     rew_info = {
@@ -704,7 +710,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         # "rew_spin_z": -loss_spin_z,
         # "rew_spin_xy": -loss_spin_xy,
         # "rew_act_change": -loss_act_change,
-        "rew_vel": -loss_vel
+        "rew_vel": -loss_vel,
+        "loss_tick": loss_tick
     }
 
     for i in range(num_goals):
@@ -713,7 +720,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         if reached is not None:
             rew_info["reached_" + str(i)] = reached[i]
         
-        if epsilon is not None:
+        if rew_type == "epsilon" and epsilon is not None:
             rew_info["epsilon_" + str(i)] = epsilon[i]
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
@@ -873,9 +880,6 @@ class QuadrotorEnv(gym.Env, Serializable):
             print("###############################################")
             self.dynamics_params = self.dynamics_params_def
 
-        ###############################################################################
-        ## OBSERVATIONS
-        self.observation_space = self.make_observation_space()
 
         ################################################################################
         ## DIMENSIONALITY
@@ -894,6 +898,10 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.tick = 0
         self.crashed = False
         self.control_freq = sim_freq / sim_steps
+
+        ###############################################################################
+        ## OBSERVATIONS
+        self.observation_space = self.make_observation_space()
 
         #########################################
         ## REWARDS PARAMS
@@ -1043,7 +1051,8 @@ class QuadrotorEnv(gym.Env, Serializable):
             "act": [np.zeros(4), np.ones(4)],
             "quat": [-np.ones(4), np.ones(4)],
             "euler": [-np.pi * np.ones(3), np.pi * np.ones(3)],
-            "reached": [0. * np.ones(1), 1. * np.ones(1)]
+            "reached": [0. * np.ones(1), 1. * np.ones(1)],
+            "tick": [0. * np.ones(1), self.ep_len * np.ones(1)]
         }
         self.obs_comp_names = list(self.obs_space_low_high.keys())
         self.obs_comp_sizes = [self.obs_space_low_high[name][1].size for name in self.obs_comp_names]
@@ -1058,6 +1067,9 @@ class QuadrotorEnv(gym.Env, Serializable):
             elif comp == 'reached':
                 obs_low.extend([self.obs_space_low_high[comp][0]] * self.num_goals)
                 obs_high.extend([self.obs_space_low_high[comp][1]] * self.num_goals)
+            elif comp == 'tick':
+                obs_low.extend([self.obs_space_low_high[comp][0]])
+                obs_high.extend([self.obs_space_low_high[comp][1]])
             else:
                 obs_low.append(self.obs_space_low_high[comp][0])
                 obs_high.append(self.obs_space_low_high[comp][1])
@@ -1129,7 +1141,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             
         self.time_remain = self.ep_len - self.tick
         reward, rew_info, self.epsilon = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
-                            rew_coeff=self.rew_coeff, action_prev=self.actions[1], epsilon=self.epsilon)
+                            rew_coeff=self.rew_coeff, action_prev=self.actions[1], tick=self.tick, epsilon=self.epsilon)
         self.tick += 1
         done = self.tick > self.ep_len #or self.crashed
         sv = self.state_vector(self)
