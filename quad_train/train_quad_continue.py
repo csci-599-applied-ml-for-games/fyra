@@ -160,10 +160,10 @@ def run_task_new(task_param):
     from garage.tf.envs import TfEnv
     from garage.tf.policies import GaussianMLPPolicy, DeterministicMLPPolicy, GaussianGRUPolicy, GaussianLSTMPolicy
     
-    from quad_dynalearn.algos.cem import CEM
-    from quad_dynalearn.algos.cma_es import CMAES
-    from quad_dynalearn.algos.ppo import PPO
-    from quad_dynalearn.algos.trpo import TRPO
+    from quad_train.algos.cem import CEM
+    from quad_train.algos.cma_es import CMAES
+    from quad_train.algos.ppo import PPO
+    from quad_train.algos.trpo import TRPO
 
     import sys
     import os
