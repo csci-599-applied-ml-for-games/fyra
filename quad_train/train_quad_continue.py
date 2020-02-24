@@ -178,11 +178,11 @@ def run_task_new(task_param):
         # from gym_art.quadrotor.quadrotor_control import *
         # from gym_art.quadrotor.quadrotor_modular import QuadrotorEnv
         try:
-            from gym_art.quadrotor.quadrotor import QuadrotorEnv
+            from quad_sim.quadrotor import QuadrotorEnv
             env = TfEnv(QuadrotorEnv(**task_param["env_param"]))
         except:
             print("WARNING: Couldn't load quadrotor.py, using quadrotor_modular.py")
-            from gym_art.quadrotor.quadrotor_modular import QuadrotorEnv
+            from quad_sim.quadrotor import QuadrotorEnv
             env = TfEnv(QuadrotorEnv(**task_param["env_param"]))
         del task_param["env_param"]
     else:
