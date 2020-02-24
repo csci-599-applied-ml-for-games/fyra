@@ -6,6 +6,11 @@ with a custom env
 import argparse
 import sys
 import os
+
+os.environ["OMP_NUM_THREADS"]="6"
+os.environ["KMP_AFFINITY"]="none"
+
+
 import datetime, time
 import itertools
 import os.path as osp
