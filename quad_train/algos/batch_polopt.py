@@ -249,7 +249,7 @@ class BatchPolopt(RLAlgorithm):
             logger.record_tabular("rewards/" + key + "_std", np.std(rew_sums))
 
 
-    def train(self, sess=None):
+    def train(self, sess=None, step=None):
         created_session = True if (sess is None) else False
         if sess is None:
             sess = tf.Session()
@@ -271,6 +271,10 @@ class BatchPolopt(RLAlgorithm):
         start_time = time.time()
         last_average_return = None
         samples_total = 0
+
+        if step is not None:
+            logger.set_tensorboard_step_key(int(step))
+        
         for itr in range(self.start_itr, self.n_itr):
             if samples_total >= self.max_samples:
                 print("WARNING: Total max num of samples collected: %d >= %d" % (samples_total, self.max_samples))
