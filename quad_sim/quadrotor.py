@@ -588,32 +588,32 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
             if i != idx:
                 loss_pos[i] = 0
     
-    elif rew_type == 'epsilon':
+    elif rew_type == 'positive_no_orient_no_trailing':
+        # positive reward for each goal reached, no penalty for Z orientation
+        # no penalty for a goal once its been reached
+
         assert reached is not None
         assert epsilon is not None
 
         # positive reward coefficients for reaching goal i
-
         scaling_coeffs = [4, 8]
 
-        # activate loss_pos[i] only if previous goal was reached
         for i in range(num_goals):
-            # if np.prod(reached[:i]):
-            #     epsilon[i] = min(epsilon[i], dist[i])
             if reached[i]:
-                loss_pos[i] = 0
+                loss_pos[i] = scaling_coeffs[i]
             else:
                 loss_pos[i] *=  np.prod(reached[:i]) # * epsilon[i]
-            
-            loss_pos[i] -= np.dot(reached, scaling_coeffs) / num_goals
-    
-    elif rew_type == "continuous":
+                
+    elif rew_type == "tick":
         assert reached is not None
+        # penalize for time until last goal is reached
+        if not reached[-1]:
+            loss_tick += 0.1 * tick
 
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
-            if i >= 1 and reached[i-1]:
-                loss_pos[i] -= goal_dist * rew_coeff["pos_linear_weight"]
+        for i in range(1, num_goals):
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
     
     elif rew_type == 'all_goal_positive':
         assert reached is not None
