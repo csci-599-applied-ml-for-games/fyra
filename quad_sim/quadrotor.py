@@ -553,7 +553,7 @@ class QuadrotorDynamics(object):
 def get_goal_at(i, goal):
     return goal[i*3:i*3+3]    
 
-def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, tick=None, epsilon=None):
+def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, tick=None, epsilon=None, time_to_goal=None):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
@@ -596,7 +596,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         assert reached is not None
 
         # positive reward coefficients for reaching goal i
-        scaling_coeffs = [4, 8]
+        scaling_coeffs = [-4, -8]
         assert num_goals == len(scaling_coeffs)
         
         for i in range(num_goals-1):
@@ -606,8 +606,38 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
                 loss_pos[i] *=  np.prod(reached[:i])
         
         # always hover at last goal
-        loss_pos[num_goals-1] *= np.prod(reached[:(num_goals-1)]) 
+        loss_pos[-1] *=  np.prod(reached[:-1])
+        if reached[-1]:
+            loss_pos[-1] += scaling_coeffs[-1]  # positive reward
 
+
+    elif rew_type == "tick_v2":
+        # penalize for time linearly until last goal is reached
+        assert reached is not None
+        assert tick is not None
+        assert time_to_goal is not None
+
+        scaling_coeffs = [-4, -8]
+        rew_tick = 0.01
+
+        assert num_goals == len(scaling_coeffs)
+        
+        for i in range(num_goals-1):
+            if reached[i]:
+                assert time_to_goal[i] > 0
+                loss_pos[i] = scaling_coeffs[i] / (rew_tick * time_to_goal[i])
+            else:
+                loss_pos[i] *=  np.prod(reached[:i]) * rew_tick * tick
+ 
+        # always hover at last goal
+        if reached[-1]:
+            assert time_to_goal[-1] > 0
+            loss_pos[-1] *=  np.prod(reached[:-1]) # penalize for distance but not time
+            loss_pos[-1] += scaling_coeffs[-1] / (rew_tick * time_to_goal[-1])  # positive reward
+        else:
+            loss_pos[-1] *= np.prod(reached[:-1]) * rew_tick * tick # penalize for time and dist
+
+    
     elif rew_type == "tick":
         assert reached is not None
         # penalize for time until last goal is reached
@@ -800,11 +830,19 @@ class QuadrotorEnv(gym.Env, Serializable):
         # multiple goals
         self.num_goals = num_goals
         self.goal_dist = goal_dist
+        self.rew_type = rew_type
+
 
         if 'reached' in self.obs_repr:
             self.reached = np.zeros(self.num_goals)
         else:
             self.reached = None
+        
+        if 'tick' in self.obs_repr:
+            assert 'tick' in self.rew_type
+            self.time_to_goal = np.zeros(self.num_goals)
+        else:
+            self.time_to_goal = None
 
         if self.num_goals > 1:
             assert 'nxyz' in self.obs_repr, "If using multiple goals, use nxyz in obs_repr."
@@ -904,7 +942,6 @@ class QuadrotorEnv(gym.Env, Serializable):
 
         #########################################
         ## REWARDS PARAMS
-        self.rew_type = rew_type
         self.rew_coeff = {
             "pos": 1., "pos_offset": 0.1, "pos_log_weight": 0., "pos_linear_weight": 1.,
             "multi_goal_scaling": 2.,
@@ -1133,14 +1170,17 @@ class QuadrotorEnv(gym.Env, Serializable):
         
         # only set reached if it was in obs_repr
         if self.reached is not None:
-            for i in range( self.num_goals):
+            for i in range(self.num_goals):
                 # if all previous flags are true and current flag is false
                 if np.prod(self.reached[:i]) and not self.reached[i]:
                     self.reached[i] = np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)) <= self.goal_tolerance
-            
+                    # compute time it took to reach goal i
+                    if self.time_to_goal is not None:
+                        self.time_to_goal[i] = self.tick
+
         self.time_remain = self.ep_len - self.tick
         reward, rew_info, self.epsilon = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
-                            rew_coeff=self.rew_coeff, action_prev=self.actions[1], tick=self.tick, epsilon=self.epsilon)
+                            rew_coeff=self.rew_coeff, action_prev=self.actions[1], tick=self.tick, epsilon=self.epsilon, time_to_goal=self.time_to_goal)
         self.tick += 1
         done = self.tick > self.ep_len #or self.crashed
         sv = self.state_vector(self)
