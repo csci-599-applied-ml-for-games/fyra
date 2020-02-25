@@ -610,6 +610,15 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         if reached[-1]:
             loss_pos[-1] += scaling_coeffs[-1]  # positive reward
 
+    elif rew_type == "continuous":
+        
+        assert reached is not None
+
+        for i in range(num_goals):
+            loss_pos[i] *= np.prod(reached[:i])
+            if i >= 1 and reached[i-1]:
+                loss_pos[i] -= goal_dist * rew_coeff["pos_linear_weight"]
+
 
     elif rew_type == "tick_v2":
         # penalize for time linearly until last goal is reached
