@@ -551,15 +551,21 @@ class QuadrotorDynamics(object):
 # reasonable reward function for hovering at a goal and not flying too high
 
 def get_goal_at(i, goal):
-    return goal[i*3:i*3+3]    
+    return goal[i*3:i*3+3]
+
+def get_vel_proj(goal_index):
+            dx = get_goal_at(goal_index, goal) - dynamics.pos
+            dx = dx / (np.linalg.norm(dx) + EPS)
+            return np.dot(dx, dynamics.vel)    
 
 def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, tick=None, epsilon=None, time_to_goal=None):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
     
-    loss_pos = []
     loss_tick = 0
+    loss_pos = []
+    loss_vel = np.zeros(num_goals)
     dist = []
     ## log to create a sharp peak at the goal
     for i in range(num_goals):
@@ -609,7 +615,39 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         loss_pos[-1] *=  np.prod(reached[:-1])
         if reached[-1]:
             loss_pos[-1] += scaling_coeffs[-1]  # positive reward
+    
+    elif rew_type == 'velocity':
+        
+        assert rew_coeff["vel"] > 0
+        assert reached is not None
 
+        # positive reward coefficients for reaching goal i
+        scaling_coeffs = [-4, -8]
+        assert num_goals == len(scaling_coeffs)
+
+        for i in range(num_goals-1):
+            if reached[i]:
+                loss_pos[i] = scaling_coeffs[i]
+            else:
+                loss_pos[i] *= np.prod(reached[:i])
+                loss_vel[i] = - np.prod(reached[:i]) * rew_coeff["vel"] * get_vel_proj(i)
+
+        
+        # always hover at last goal
+        
+        loss_pos[-1] *= np.prod(reached[:-1])
+        loss_vel[-1] = np.prod(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i)
+
+        if reached[-1]:
+            loss_pos[-1] += scaling_coeffs[-1]  # positive reward
+            loss_vel[-1] = 0
+
+
+    #elif rew_type == "no_reached":
+        # dont check if reached. Instead, the loss_pos penalty for a goal just decreases as
+        # you get closer to the goal
+
+            
     elif rew_type == "continuous":
         
         assert reached is not None
@@ -633,16 +671,16 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         
         for i in range(num_goals-1):
             if reached[i]:
-                assert time_to_goal[i] > 0
-                loss_pos[i] = scaling_coeffs[i] / (rew_tick * time_to_goal[i])
+                # assert time_to_goal[i] > 0 THIS MIGHT'VE FAILED
+                loss_pos[i] = scaling_coeffs[i] / (rew_tick * time_to_goal[i] + EPS)
             else:
                 loss_pos[i] *=  np.prod(reached[:i]) * rew_tick * tick
  
         # always hover at last goal
         if reached[-1]:
-            assert time_to_goal[-1] > 0
+             # assert time_to_goal[i] > 0 THIS MIGHT'VE FAILED
             loss_pos[-1] *=  np.prod(reached[:-1]) # penalize for distance but not time
-            loss_pos[-1] += scaling_coeffs[-1] / (rew_tick * time_to_goal[-1])  # positive reward
+            loss_pos[-1] += scaling_coeffs[-1] / (rew_tick * time_to_goal[-1] + EPS)  # positive reward
         else:
             loss_pos[-1] *= np.prod(reached[:-1]) * rew_tick * tick # penalize for time and dist
 
@@ -693,7 +731,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
     # loss_vel_proj = - rew_coeff["vel_proj"] * dist * vel_proj
 
     # loss_vel_proj = 0. 
-    loss_vel = rew_coeff["vel"] * np.linalg.norm(dynamics.vel)
+    
 
     ##################################################
     ## Loss orientation
@@ -732,7 +770,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         # loss_spin_z,
         # loss_spin_xy,
         loss_act_change,
-        loss_vel,
+        np.sum(loss_vel),
         loss_tick
     ])
     
