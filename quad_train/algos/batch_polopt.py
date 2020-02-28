@@ -274,6 +274,8 @@ class BatchPolopt(RLAlgorithm):
 
         if step is not None:
             logger.set_tensorboard_step_key(int(step))
+        else:
+            logger.set_tensorboard_step_key(0)
         
         for itr in range(self.start_itr, self.n_itr):
             if samples_total >= self.max_samples:
