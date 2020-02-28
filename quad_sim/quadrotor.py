@@ -553,7 +553,7 @@ class QuadrotorDynamics(object):
 def get_goal_at(i, goal):
     return goal[i*3:i*3+3]
 
-def get_vel_proj(goal_index):
+def get_vel_proj(goal_index, goal, dynamics):
             dx = get_goal_at(goal_index, goal) - dynamics.pos
             dx = dx / (np.linalg.norm(dx) + EPS)
             return np.dot(dx, dynamics.vel)    
@@ -630,13 +630,13 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
                 loss_pos[i] = scaling_coeffs[i]
             else:
                 loss_pos[i] *= np.prod(reached[:i])
-                loss_vel[i] = - np.prod(reached[:i]) * rew_coeff["vel"] * get_vel_proj(i)
+                loss_vel[i] = - np.prod(reached[:i]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
 
         
         # always hover at last goal
         
         loss_pos[-1] *= np.prod(reached[:-1])
-        loss_vel[-1] = np.prod(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i)
+        loss_vel[-1] = np.prod(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
 
         if reached[-1]:
             loss_pos[-1] += scaling_coeffs[-1]  # positive reward
