@@ -3,9 +3,9 @@ variant:
   env: QuadrotorEnv
   env_param:
     obs_repr : nxyz_vxyz_R_omega_reached
-    num_goals: 2
+    num_goals: 1
     min_goal_dist: 0.2
-    max_goal_dist: 5
+    max_goal_dist: 1
     goal_tolerance: 0.05
     dynamics_params: Crazyflie
     dynamics_change:
@@ -46,7 +46,7 @@ variant:
     plot: False
     store_paths: False
     play_every_itr: null
-    record_every_itr: 100
+    record_every_itr: 1
   baseline_class: GaussianMLPBaseline
   baseline_param: {} 
   policy_class: GaussianMLPPolicy
