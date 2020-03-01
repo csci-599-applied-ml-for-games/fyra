@@ -1,6 +1,4 @@
 #!/bin/bash
-parallel ./train_quad.py config/ppo__crazyflie_baseline.yml _results_temp/ppo_crazyflie_simplified_goal \
+parallel ./train_quad.py config/ppo_crazyflie_baseline.yml _results_temp/ppo_crazyflie_baseline \
 --seed {1} \
--p env_param.rew_coeff.orient \
--pv {2} \
-::: {1..3} ::: 0.5 0.2 0.1
+::: {1..3}
