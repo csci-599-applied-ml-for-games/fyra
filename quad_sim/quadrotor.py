@@ -558,7 +558,7 @@ def get_vel_proj(goal_index, goal, dynamics):
     dx = dx / (np.linalg.norm(dx) + EPS)
     return np.dot(dx, dynamics.vel)
 
-def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, tick=None, min_dist_to_goal=None, time_to_goal=None):
+def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt, crashed, reached, time_remain, rew_coeff, action_prev, tick=None, min_dist_to_goal=None, time_to_goal=None):
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
@@ -701,7 +701,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
             if i >= 1 and reached[i-1]:
-                loss_pos[i] -= goal_dist * rew_coeff["pos_linear_weight"]
+                loss_pos[i] -= max_goal_dist * rew_coeff["pos_linear_weight"]
 
     elif rew_type == "tick":
         assert reached is not None
@@ -712,7 +712,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
         for i in range(1, num_goals):
-            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
     
     elif rew_type == "tick_v2":
         # penalize for time linearly until last goal is reached
@@ -747,7 +747,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
         for i in range(1, num_goals):
-            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
 
     elif rew_type == "simplified_goal":
         assert reached is not None
@@ -761,7 +761,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, goal_dist, action, dt, cra
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
         for i in range(1, num_goals):
-            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * goal_dist
+            loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
         for i in range(0, num_goals-1):
             loss_pos[i] = min_loss_pos[i] if reached[i] else loss_pos[i]
 
@@ -835,7 +835,7 @@ class QuadrotorEnv(gym.Env, Serializable):
     def __init__(self, dynamics_params="DefaultQuad", dynamics_change=None, 
                 dynamics_randomize_every=None, dyn_sampler_1=None, dyn_sampler_2=None,
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
-                obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
+                obs_repr="xyz_vxyz_R_omega", num_goals=1, min_goal_dist=0.2, max_goal_dist=5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
                 rew_type="default", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
                 t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False):
         np.seterr(under='ignore')
@@ -886,9 +886,9 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.goal_tolerance = goal_tolerance
         # multiple goals
         self.num_goals = num_goals
-        self.goal_dist = goal_dist
         self.rew_type = rew_type
-
+        self.min_goal_dist = min_goal_dist
+        self.max_goal_dist = max_goal_dist
 
         if 'reached' in self.obs_repr:
             self.reached = np.zeros(self.num_goals)
@@ -1115,7 +1115,8 @@ class QuadrotorEnv(gym.Env, Serializable):
         x = r * np.cos(theta)
         y = r * np.sin(theta)
 
-        new_point = np.array([point[0] + self.goal_dist * x, point[1] + self.goal_dist * y, point[2] + self.goal_dist * z])
+        goal_dist = np.random.uniform(self.min_goal_dist, self.max_goal_dist)
+        new_point = np.array([point[0] + goal_dist * x, point[1] + goal_dist * y, point[2] + goal_dist * z])
 
         # check if new_point is within room constraints
         if ((self.room_box[0][0] + self.wall_offset) <= new_point[0] <= (self.room_box[1][0] - self.wall_offset)
@@ -1236,7 +1237,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.min_dist_to_goal[i] = min(self.min_dist_to_goal[i], np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)))
 
         self.time_remain = self.ep_len - self.tick
-        reward, rew_info = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
+        reward, rew_info = compute_reward_weighted(self.rew_type, self.dynamics, self.goal, self.max_goal_dist, action, self.dt, self.crashed, self.reached, self.time_remain, 
                             rew_coeff=self.rew_coeff, action_prev=self.actions[1], tick=self.tick, min_dist_to_goal=self.min_dist_to_goal, time_to_goal=self.time_to_goal)
         self.tick += 1
         done = self.tick > self.ep_len #or self.crashed
@@ -1440,7 +1441,7 @@ class UpDownPolicy(object):
 
 def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None, 
     render=True, traj_num=10, plot_step=None, plot_dyn_change=True, plot_thrusts=False,
-    sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_rot_omega", num_goals=1, goal_dist=None, csv_filename=None):
+    sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_rot_omega", num_goals=1, csv_filename=None):
     import tqdm
     #############################
     # Init plottting
@@ -1475,7 +1476,7 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
 
     env = QuadrotorEnv(dynamics_params=quad, raw_control=raw_control, raw_control_zero_middle=raw_control_zero_middle, 
         dynamics_randomize_every=dyn_randomize_every, dyn_sampler_1=sampler_1,
-        sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr, num_goals=num_goals, goal_dist=goal_dist)
+        sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr, num_goals=num_goals)
 
 
     policy.dt = 1./ env.control_freq
@@ -1614,7 +1615,7 @@ def test_rollout(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
 
 def benchmark(quad, dyn_randomize_every=None, dyn_randomization_ratio=None, 
     render=True, traj_num=10, plot_step=None, plot_dyn_change=True, plot_thrusts=False,
-    sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_R_omega_act", num_goals=1, goal_dist=None, csv_filename=None):
+    sense_noise=None, policy_type="mellinger", init_random_state=False, obs_repr="xyz_vxyz_R_omega_act", num_goals=1, csv_filename=None):
     import tqdm
     rollouts_num = traj_num
 
@@ -1638,7 +1639,7 @@ def benchmark(quad, dyn_randomize_every=None, dyn_randomization_ratio=None,
 
     env = QuadrotorEnv(dynamics_params=quad, raw_control=raw_control, raw_control_zero_middle=raw_control_zero_middle, 
         dynamics_randomize_every=dyn_randomize_every, dyn_sampler_1=sampler_1,
-        sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr, num_goals=num_goals, goal_dist=goal_dist)
+        sense_noise=sense_noise, init_random_state=init_random_state, obs_repr=obs_repr, num_goals=num_goals)
 
 
     policy.dt = 1./ env.control_freq
@@ -1772,15 +1773,6 @@ def main(argv):
              "3" 
     )
     parser.add_argument(
-        '-gd',"--goal_dist",
-        type=int,
-        default=0.5,
-        help="Distance between each goal. Options:\n" +
-             "0.5" +
-             "1.0" +
-             "2.0" 
-    )
-    parser.add_argument(
         '-b',"--benchmark",
         action="store_true",
         help="Simple benchmark, i.e. running time" 
@@ -1808,7 +1800,6 @@ def main(argv):
             obs_repr=args.obs_repr,
             csv_filename=args.csv_filename,
             num_goals=args.num_goals, 
-            goal_dist=args.goal_dist
         )
     else:
         print('Running test rollout ...')
@@ -1827,7 +1818,6 @@ def main(argv):
             obs_repr=args.obs_repr,
             csv_filename=args.csv_filename,
             num_goals=args.num_goals,
-            goal_dist=args.goal_dist
         )
 
 
