@@ -629,9 +629,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
     if rew_type == 'default' or rew_type == 'all_goal_active':
         if num_goals > 1:
             assert reached is not None
-        
-        # activate loss_pos[i] only if all previous goals are reached
-        for i in range(num_goals):
+            # activate loss_pos[i] only if all previous goals are reached
+            for i in range(num_goals):
                 loss_pos[i] *= np.prod(reached[:i])
     
     elif rew_type == 'current_goal_active':
@@ -764,6 +763,15 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
             loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
         for i in range(0, num_goals-1):
             loss_pos[i] = min_loss_pos[i] if reached[i] else loss_pos[i]
+    
+    elif rew_type == "bare_minimum":
+        assert reached is not None
+        # setting unwanted losses to zero
+        loss_orient = loss_yaw = loss_rotation = loss_attitude = loss_tick = 0.0
+        loss_vel = [0.0]
+
+        for i in range(num_goals):
+            loss_pos[i] = -reached[i] * (rew_coeff['multi_goal_scaling'] ** i)
 
     else:
         raise NotImplementedError("rew_type " + rew_type + " is either invalid or has not been implemented")
@@ -835,7 +843,7 @@ class QuadrotorEnv(gym.Env, Serializable):
     def __init__(self, dynamics_params="DefaultQuad", dynamics_change=None, 
                 dynamics_randomize_every=None, dyn_sampler_1=None, dyn_sampler_2=None,
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
-                obs_repr="xyz_vxyz_R_omega", num_goals=1, min_goal_dist=0.2, max_goal_dist=5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
+                obs_repr="xyz_vxyz_R_omega", num_goals=1, min_goal_dist=0.2, max_goal_dist=5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=2, init_random_state=False, 
                 rew_type="default", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
                 t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False):
         np.seterr(under='ignore')
@@ -1325,7 +1333,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         if self.resample_goal:
             self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
         else:
-            self.goal = np.array([0., 0., 2.])
+            self.goal = np.array([0., 0., 1.])
 
         if self.num_goals > 1:
             for _ in range(self.num_goals-1):

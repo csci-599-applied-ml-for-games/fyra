@@ -19,18 +19,18 @@ variant:
     sim_steps: 2
     ep_time: 7
     sense_noise: default
-    rew_type: default #epsilon # all_goal_active # current_goal_active # epsilon
+    rew_type: bare_minimum #epsilon # all_goal_active # current_goal_active # epsilon
     rew_coeff:
-      pos: 1. 
+      pos: 0. 
       pos_log_weight: 0.
-      pos_linear_weight: 1.
+      pos_linear_weight: 0.
       multi_goal_scaling: 2.
       effort: 0.05
       spin: 0.1
       vel: 0.0
       crash: 1.
-      orient: 1.
-      yaw: 0. 
+      orient: 0.
+      yaw: 0.
   alg_class: PPO
   alg_param:
     batch_size: 35000
