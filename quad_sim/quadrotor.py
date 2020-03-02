@@ -688,7 +688,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         # always hover at last goal
         
         loss_pos[-1] *= np.prod(reached[:-1])
-        loss_vel[-1] = np.prod(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
+        loss_vel[-1] = - np.prod(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
 
         if reached[-1]:
             loss_pos[-1] += scaling_coeffs[-1]  # positive reward
