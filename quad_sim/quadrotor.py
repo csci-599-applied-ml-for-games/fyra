@@ -599,7 +599,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
     # loss_vel_proj = - rew_coeff["vel_proj"] * dist * vel_proj
 
     # loss_vel_proj = 0. 
-    loss_vel = rew_coeff["vel"] * np.linalg.norm(dynamics.vel)
+    if rew_type != "velocity":
+        loss_vel = rew_coeff["vel"] * np.linalg.norm(dynamics.vel)
 
     ##################################################
     ## Loss orientation
