@@ -15,7 +15,7 @@ def test_rollout(
         dt=0.005,
         sim_steps=2,
         ep_time=7.0,
-        render_each=2,
+        render_each=1,
         use_noise=False, # if it's true, use what the env already has
         random_init=False,  # if it's true, use what the env already has
         random_quad=False,  # if it's true, use what the env already has
@@ -46,9 +46,10 @@ def test_rollout(
     with tf.Session() as sess:
         print("extrating parameters from file %s ..." % param_file)
         params = joblib.load(param_file)
-
-        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.1, rew_type="epsilon")
-        # env = params['env'].env
+        goals = None
+        goals = np.array([1. ,1. ,2. ,1. ,1 , 2.5 ])
+        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.05, goal_dist=0.5, rew_type="all_goal_positive", manual_goals=goals)
+        #env = params['env'].env
         policy = params['policy']
         
         ## modify the environment
@@ -58,7 +59,7 @@ def test_rollout(
         if not random_init:
             ## set init random state to False
             env.init_random_state = False
-            init_pos = np.array([0, 0, 0.05])
+            init_pos = np.array([0, 0, 1])
             init_vel = np.array([0, 0, 0])
             init_rot = rpy2R(0, 0, 0) # np.eye(3) 
             init_omega = np.array([0, 0, 0])
@@ -88,7 +89,7 @@ def test_rollout(
             policy.reset()
             
             ## reset the goal to x:0, y:0 z:0
-            # env.goal = np.array([0., 0., 1])
+            # env.goal = np.array([0., 0., 1, 0., 0., 2])
             
             dynamics = env.dynamics
             print("thrust to weight ratio set to: {}, and max thrust is {}".format(dynamics.thrust_to_weight, dynamics.thrust_max))

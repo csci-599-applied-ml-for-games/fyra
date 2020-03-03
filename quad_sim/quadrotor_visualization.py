@@ -125,9 +125,9 @@ class Quadrotor3DScene(object):
 
     def update_goal_diameter(self):
         if self.quad_arm is not None:
-            self.diameter = 2 * self.quad_arm
+            self.diameter = 1.5 * self.quad_arm
         else:
-            self.diameter = 2 * np.linalg.norm(self.model.params["motor_pos"]["xyz"][:2])
+            self.diameter = 1.5 * np.linalg.norm(self.model.params["motor_pos"]["xyz"][:2])
          
         if self.goal_forced_diameter:
             self.goal_diameter = self.goal_forced_diameter

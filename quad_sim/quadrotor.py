@@ -827,7 +827,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
                 obs_repr="xyz_vxyz_R_omega", num_goals=1, goal_dist=0.5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
                 rew_type="default", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
-                t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False):
+                t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False, manual_goals=None):
         np.seterr(under='ignore')
         """
         Args:
@@ -878,6 +878,7 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.num_goals = num_goals
         self.goal_dist = goal_dist
         self.rew_type = rew_type
+        self.manual_goals = manual_goals
 
 
         if 'reached' in self.obs_repr:
@@ -1315,10 +1316,13 @@ class QuadrotorEnv(gym.Env, Serializable):
             self.goal = np.array([0., 0., np.random.uniform(0.5, 2.0)])
         else:
             self.goal = np.array([0., 0., 2.])
+        if self.manual_goals is not None:
+            self.goal = self.manual_goals
 
-        if self.num_goals > 1:
+        elif self.num_goals > 1:
             for _ in range(self.num_goals-1):
                 self.goal = np.concatenate((self.goal, self.sample_goal_at_dist(self.goal[-3:])))
+
         
         if self.reached is not None:
             self.reached = np.zeros(self.num_goals)
