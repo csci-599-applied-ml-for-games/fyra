@@ -599,7 +599,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
     # loss_vel_proj = - rew_coeff["vel_proj"] * dist * vel_proj
 
     # loss_vel_proj = 0. 
-    loss_vel = rew_coeff["vel"] * np.linalg.norm(dynamics.vel)
+    # loss_vel = rew_coeff["vel"] * np.linalg.norm(dynamics.vel)
 
     ##################################################
     ## Loss orientation
@@ -631,7 +631,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
             assert reached is not None
             # activate loss_pos[i] only if all previous goals are reached
             for i in range(num_goals):
-                loss_pos[i] *= np.prod(reached[:i])
+                loss_pos[i] *= np.all(reached[:i])
     
     elif rew_type == 'current_goal_active':
         assert reached is not None
@@ -661,10 +661,10 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
             if reached[i]:
                 loss_pos[i] = scaling_coeffs[i]
             else:
-                loss_pos[i] *=  np.prod(reached[:i])
+                loss_pos[i] *=  np.all(reached[:i])
         
         # always hover at last goal
-        loss_pos[-1] *=  np.prod(reached[:-1])
+        loss_pos[-1] *=  np.all(reached[:-1])
         if reached[-1]:
             loss_pos[-1] += scaling_coeffs[-1]  # positive reward
     
@@ -681,13 +681,13 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
             if reached[i]:
                 loss_pos[i] = scaling_coeffs[i]
             else:
-                loss_pos[i] *= np.prod(reached[:i])
-                loss_vel[i] = - np.prod(reached[:i]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
+                loss_pos[i] *= np.all(reached[:i])
+                loss_vel[i] = -np.all(reached[:i]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
 
         # always hover at last goal
         
-        loss_pos[-1] *= np.prod(reached[:-1])
-        loss_vel[-1] = np.prod(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
+        loss_pos[-1] *= np.all(reached[:-1])
+        loss_vel[-1] = np.all(reached[:-1]) * rew_coeff["vel"] * get_vel_proj(i, goal, dynamics)
 
         if reached[-1]:
             loss_pos[-1] += scaling_coeffs[-1]  # positive reward
@@ -698,7 +698,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         assert reached is not None
 
         for i in range(num_goals):
-            loss_pos[i] *= np.prod(reached[:i])
+            loss_pos[i] *= np.all(reached[:i])
             if i >= 1 and reached[i-1]:
                 loss_pos[i] -= max_goal_dist * rew_coeff["pos_linear_weight"]
 
@@ -709,7 +709,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
             loss_tick += 0.1 * tick
 
         for i in range(num_goals):
-            loss_pos[i] *= np.prod(reached[:i])
+            loss_pos[i] *= np.all(reached[:i])
         for i in range(1, num_goals):
             loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
     
@@ -729,22 +729,22 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
                 # assert time_to_goal[i] > 0 THIS MIGHT'VE FAILED
                 loss_pos[i] = scaling_coeffs[i] / (rew_tick * time_to_goal[i] + EPS)
             else:
-                loss_pos[i] *=  np.prod(reached[:i]) * rew_tick * tick
+                loss_pos[i] *=  np.all(reached[:i]) * rew_tick * tick
  
         # always hover at last goal
         if reached[-1]:
              # assert time_to_goal[i] > 0 THIS MIGHT'VE FAILED
-            loss_pos[-1] *=  np.prod(reached[:-1]) # penalize for distance but not time
+            loss_pos[-1] *=  np.all(reached[:-1]) # penalize for distance but not time
             loss_pos[-1] += scaling_coeffs[-1] / (rew_tick * time_to_goal[-1] + EPS)  # positive reward
         else:
-            loss_pos[-1] *= np.prod(reached[:-1]) * rew_tick * tick # penalize for time and dist
+            loss_pos[-1] *= np.all(reached[:-1]) * rew_tick * tick # penalize for time and dist
     
     elif rew_type == 'all_goal_positive':
         assert reached is not None
         
         # activate loss_pos[i] only if all previous goals are reached
         for i in range(num_goals):
-            loss_pos[i] *= np.prod(reached[:i])
+            loss_pos[i] *= np.all(reached[:i])
         for i in range(1, num_goals):
             loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
 
@@ -758,7 +758,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         
         # activate loss_pos[i] only if all previous goals are reached
         for i in range(num_goals):
-            loss_pos[i] *= np.prod(reached[:i])
+            loss_pos[i] *= np.all(reached[:i])
         for i in range(1, num_goals):
             loss_pos[i] += (not reached[i-1]) * 2 * (rew_coeff['multi_goal_scaling'] ** i) * max_goal_dist
         for i in range(0, num_goals-1):
@@ -771,8 +771,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         loss_vel = np.zeros(num_goals)
 
         for i in range(num_goals):
-            loss_pos[i] = -reached[i] * (rew_coeff['multi_goal_scaling'] ** i)
-
+            loss_pos[i] = -(rew_coeff['multi_goal_scaling'] ** i) if (reached[i] == 1) else 0
+        
     else:
         raise NotImplementedError("rew_type " + rew_type + " is either invalid or has not been implemented")
 
@@ -1152,7 +1152,7 @@ class QuadrotorEnv(gym.Env, Serializable):
             "act": [np.zeros(4), np.ones(4)],
             "quat": [-np.ones(4), np.ones(4)],
             "euler": [-np.pi * np.ones(3), np.pi * np.ones(3)],
-            "reached": [0. * np.ones(1), 1. * np.ones(1)],
+            "reached": [0. * np.ones(1), 2. * np.ones(1)],
             "tick": [0. * np.ones(1), self.ep_len * np.ones(1)]
         }
         self.obs_comp_names = list(self.obs_space_low_high.keys())
@@ -1236,13 +1236,17 @@ class QuadrotorEnv(gym.Env, Serializable):
         # only set reached if it was in obs_repr
         if self.reached is not None:
             for i in range(self.num_goals):
+                # if we are have already reached this point
+                if self.reached[i] == 1:
+                    self.reached[i] = 2
+                
                 # if all previous flags are true and current flag is false
-                if np.prod(self.reached[:i]) and not self.reached[i]:
-                    self.reached[i] = np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)) <= self.goal_tolerance
+                if np.all(self.reached[:i]) and not self.reached[i]:
+                    self.reached[i] = int(np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)) <= self.goal_tolerance)
                     # compute time it took to reach goal i
                     if self.time_to_goal is not None:
                         self.time_to_goal[i] = self.tick
-
+        
         for i in range(self.num_goals):
             self.min_dist_to_goal[i] = min(self.min_dist_to_goal[i], np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)))
 
@@ -1341,7 +1345,6 @@ class QuadrotorEnv(gym.Env, Serializable):
             for _ in range(self.num_goals-1):
                 self.goal = np.concatenate((self.goal, self.sample_goal_at_dist(self.goal[-3:])))
         
-        print(self.goal)
         if self.reached is not None:
             self.reached = np.zeros(self.num_goals)
 
