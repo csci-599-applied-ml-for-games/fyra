@@ -40,7 +40,7 @@ from quad_sim.quad_utils import *
 import quad_sim.get_state as get_state
 from quad_sim.inertia import QuadLink, QuadLinkSimplified
 from quad_sim.sensor_noise import SensorNoise
-
+sys.path.append('~/projects/cs599/')
 from quad_sim.quad_models import *
 
 try:
@@ -562,13 +562,15 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
     ##################################################
     assert len(goal) % 3 == 0
     num_goals = len(goal)//3
-    
+
+    loss_pos = []
     loss_tick = 0
     loss_pos = []
     loss_vel = np.zeros(num_goals)
     min_loss_pos = []
     dist = []
-    
+    z_angle_to_goal = 0
+
     ## log to create a sharp peak at the goal
     for i in range(num_goals):
         dist.append(np.linalg.norm(get_goal_at(i, goal) - dynamics.pos))
@@ -630,25 +632,25 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
     if rew_type == 'default' or rew_type == 'all_goal_active':
         if num_goals > 1:
             assert reached is not None
-        
-        # activate loss_pos[i] only if all previous goals are reached
-        for i in range(num_goals):
-                loss_pos[i] *= np.prod(reached[:i])
-    
+
+            # activate loss_pos[i] only if all previous goals are reached
+            for i in range(num_goals):
+                    loss_pos[i] *= np.prod(reached[:i])
+
     elif rew_type == 'current_goal_active':
         assert reached is not None
-        
+
         # activate loss_pos[i] for the next goal only
         idx = num_goals - 1
         for i in range(num_goals):
             if reached[i] == 0:
                 idx = i
                 break
-            
+
         for i in range(num_goals):
             if i != idx:
                 loss_pos[i] = 0
-    
+
     elif rew_type == 'positive_no_orient_no_trailing':
         # positive reward for each goal reached, no penalty for Z orientation
         # no penalty for a goal once its been reached
@@ -658,13 +660,13 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         # positive reward coefficients for reaching goal i
         scaling_coeffs = [-4, -8]
         assert num_goals == len(scaling_coeffs)
-        
+
         for i in range(num_goals-1):
             if reached[i]:
                 loss_pos[i] = scaling_coeffs[i]
             else:
                 loss_pos[i] *=  np.prod(reached[:i])
-        
+
         # always hover at last goal
         loss_pos[-1] *=  np.prod(reached[:-1])
         if reached[-1]:
@@ -696,7 +698,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
             loss_vel[-1] = 0
 
     elif rew_type == "continuous":
-        
+
         assert reached is not None
 
         for i in range(num_goals):
@@ -725,14 +727,14 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         rew_tick = 0.01
 
         assert num_goals == len(scaling_coeffs)
-        
+
         for i in range(num_goals-1):
             if reached[i]:
                 # assert time_to_goal[i] > 0 THIS MIGHT'VE FAILED
                 loss_pos[i] = scaling_coeffs[i] / (rew_tick * time_to_goal[i] + EPS)
             else:
                 loss_pos[i] *=  np.prod(reached[:i]) * rew_tick * tick
- 
+
         # always hover at last goal
         if reached[-1]:
              # assert time_to_goal[i] > 0 THIS MIGHT'VE FAILED
@@ -757,7 +759,7 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
     
     elif rew_type == "simplified_epsilon":
         assert reached is not None
-        
+
         # activate loss_pos[i] only if all previous goals are reached
         for i in range(num_goals):
             loss_pos[i] *= np.prod(reached[:i])
@@ -766,13 +768,41 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         for i in range(0, num_goals-1):
             loss_pos[i] = min_loss_pos[i] if reached[i] else loss_pos[i]
 
+    elif rew_type == 'align_z_to_goal':
+        assert reached is not None
+
+        for i in range(num_goals):
+            loss_pos[i] *= np.prod(reached[:i])
+            if i >= 1 and reached[i-1]:
+                loss_pos[i] -= max_goal_dist * rew_coeff["pos_linear_weight"]
+
+        for i in range(num_goals):
+            if np.prod(reached[:i]): #calculates angle of current position z axis to next goal point if quad has reached previous goal
+                modulus_val_goal = np.linalg.norm(get_goal_at(i, goal)-dynamics.pos)
+                modulus_val_pos = np.linalg.norm(dynamics.pos)
+                z_angle_to_goal = np.arccos(np.dot(get_goal_at(i, goal)-dynamics.pos, dynamics.pos) / (modulus_val_goal*modulus_val_pos))
+
+    elif rew_type == 'align_z_to_goal_add_pi':
+        assert reached is not None
+
+        for i in range(num_goals):
+            loss_pos[i] *= np.prod(reached[:i])
+            if i >= 1 and reached[i-1]:
+                loss_pos[i] -= max_goal_dist * rew_coeff["pos_linear_weight"]
+
+        for i in range(num_goals):
+            if np.prod(reached[:i]): #calculates angle of current position z axis to next goal point if quad has reached previous goal
+                modulus_val_goal = np.linalg.norm(get_goal_at(i, goal)-dynamics.pos)
+                modulus_val_pos = np.linalg.norm(dynamics.pos)
+                z_angle_to_goal = np.arccos(np.dot(get_goal_at(i, goal)-dynamics.pos, dynamics.pos) / (modulus_val_goal*modulus_val_pos)) + (not reached[0])*np.pi
+
     else:
         raise NotImplementedError("rew_type " + rew_type + " is either invalid or has not been implemented")
 
     reward = -dt * np.sum([
         np.sum(loss_pos),
-        loss_effort, 
-        loss_crash, 
+        loss_effort,
+        loss_crash,
         loss_orient,
         loss_yaw,
         loss_rotation,
@@ -784,11 +814,11 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         np.sum(loss_vel),
         loss_tick
     ])
-    
+
     rew_info = {
         "rew_main": -np.sum(loss_pos),
-        'rew_action': -loss_effort, 
-        'rew_crash': -loss_crash, 
+        'rew_action': -loss_effort,
+        'rew_crash': -loss_crash,
         "rew_orient": -loss_orient,
         "rew_yaw": -loss_yaw,
         "rew_rot": -loss_rotation,
@@ -806,9 +836,12 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
 
         if reached is not None:
             rew_info["reached_" + str(i)] = reached[i]
-        
+
         if min_dist_to_goal is not None:
             rew_info["min_dist_to_goal_" + str(i)] = min_dist_to_goal[i]
+
+        if loss_vel is not None and isinstance(loss_vel, str):
+            rew_info["loss_vel_" + str(i)] = loss_vel[i]
 
     # print('reward: ', reward, ' pos:', dynamics.pos, ' action', action)
     # print('pos', dynamics.pos)
@@ -816,9 +849,8 @@ def compute_reward_weighted(rew_type, dynamics, goal, max_goal_dist, action, dt,
         for key, value in locals().items():
             print('%s: %s \n' % (key, str(value)))
         raise ValueError('QuadEnv: reward is Nan')
-    
-    return reward, rew_info
 
+    return reward, rew_info
 
 
 ####################################################################################################################################################################
