@@ -15,3 +15,4 @@ saved_models
 .python-version
 .vscode
 .DS_Store
+!midterm_videos/*
