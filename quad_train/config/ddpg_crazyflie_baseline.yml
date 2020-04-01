@@ -1,0 +1,65 @@
+seed: 1
+variant:
+  env: QuadrotorEnv
+  env_param:
+    obs_repr : nxyz_vxyz_R_omega_reached
+    num_goals: 2
+    min_goal_dist: 0.2
+    max_goal_dist: 5
+    goal_tolerance: 0.05
+    dynamics_params: Crazyflie
+    dynamics_change:
+      noise:
+        thrust_noise_ratio: 0.05
+      damp:
+        vel: 0.
+        omega_quadratic: 0.
+    init_random_state: True
+    sim_freq: 200 #Hz
+    sim_steps: 2
+    ep_time: 7
+    sense_noise: default
+    rew_type: default #epsilon # all_goal_active # current_goal_active # epsilon
+    rew_coeff:
+      pos: 1. 
+      pos_log_weight: 0.
+      pos_linear_weight: 1.
+      multi_goal_scaling: 2.
+      effort: 0.05
+      spin: 0.1
+      vel: 0.0
+      crash: 1.
+      orient: 1.
+      yaw: 0. 
+  alg_class: DDPG
+  alg_param:
+    policy_lr: 1e-4
+    qf_lr: 1e-3
+    qf: qf
+    replay_buffer: replay_buffer
+    plot: False
+    target_update_tau: 1e-2
+    n_epochs: 500
+    n_epoch_cycles: 20
+    max_path_length: 100
+    n_train_steps: 50
+    discount: 0.9
+    min_buffer_size: int(1e4)
+    exploration_strategy: action_noise
+    policy_optimizer: tf.train.AdamOptimizer
+    qf_optimizer: tf.train.AdamOptimizer
+  replay_buffer: SimpleReplayBuffer
+  replay_buffer_param:
+    size_in_transitions: 1000000
+    time_horizon: 100
+  action_noise: OUStrategy
+  action_noise_param:
+    sigma: 0.2
+  qf: ContinuousMLPQFunction
+  qf_param:
+    hidden_sizes: [64, 64]
+  baseline_class: GaussianMLPBaseline
+  baseline_param: {} 
+  policy_class: GaussianMLPPolicy
+  policy_param:
+    hidden_sizes: [64, 64]
