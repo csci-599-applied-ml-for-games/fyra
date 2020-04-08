@@ -10,8 +10,12 @@ involved to stabilize the training process.
 from collections import deque
 
 import numpy as np
+import os
 import tensorflow as tf
 import tensorflow.contrib as tc
+
+from quad_train.misc.dict2hdf5 import dict2h5 as h5u
+from quad_train.misc.video_recorder import VideoRecorder
 
 import garage.misc.logger as logger
 from garage.misc.overrides import overrides
@@ -172,8 +176,31 @@ class DDPG(OffPolicyRLAlgorithm):
             self.f_init_target = f_init_target
             self.f_update_target = f_update_target
 
+
+    def record_policy(self, env, policy, itr, n_rollout=1, path=None, postfix=""):
+        # Rollout
+        if path is None:
+            path = logger.get_snapshot_dir().rstrip(os.sep) + os.sep + "videos" + os.sep + "epoch_%05d%s.mp4" % (itr, postfix)
+        path_directory = path.rsplit(os.sep, 1)[0]
+        if not os.path.exists(path_directory):
+            os.makedirs(path_directory, exist_ok=True)
+        for _ in range(n_rollout):
+            obs = env.reset()
+            recorder = VideoRecorder(env.env, path=path)
+            while True:
+                # env.render()
+                # import pdb; pdb.set_trace()
+                action, _ = policy.get_action(obs)
+                obs, _, done, _ = env.step(action)
+                recorder.capture_frame()
+                if done:
+                    break
+            recorder.close()
+
+
     @overrides
     def train(self, sess=None):
+        print("train")
         created_session = True if (sess is None) else False
         if sess is None:
             sess = tf.Session()
@@ -219,6 +246,8 @@ class DDPG(OffPolicyRLAlgorithm):
                 params = self.get_itr_snapshot(epoch, samples_data)
                 logger.save_itr_params(epoch, params)
                 logger.log("Saved")
+                logger.log("Saving video")
+                self.record_policy(env=self.env, policy=self.policy, itr=epoch)
                 if self.evaluate:
                     logger.record_tabular('Epoch', epoch)
                     logger.record_tabular('AverageReturn',
@@ -256,6 +285,9 @@ class DDPG(OffPolicyRLAlgorithm):
                     if self.pause_for_plot:
                         input("Plotting evaluation run: Press Enter to "
                               "continue...")
+                #print("saving video")
+                #self.record_policy(env=self.env, policy=self.policy, itr=epoch)
+
 
         self.shutdown_worker()
         if created_session:
