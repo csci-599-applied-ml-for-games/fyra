@@ -9,7 +9,8 @@ import time
 
 def test_rollout(
         param_file, 
-        traj_file=None, 
+        traj_file=None,
+        wait_for_reached=False,
         render=False, 
         rollouts_num=1,
         dt=0.005,
@@ -31,7 +32,7 @@ def test_rollout(
     from quad_sim.quad_models import crazyflie_params
     from quad_sim.quadrotor import QuadrotorEnv
     from quad_sim.quadrotor_randomization import R2quat
-    from simulators_investigation.utils import rpy2R, R2rpy
+    from quad_gen.utils import rpy2R, R2rpy
     import tqdm
 
 
@@ -40,7 +41,7 @@ def test_rollout(
     if traj_file != None:
         print("Reading trajectory...")
         traj = np.loadtxt(traj_file, delimiter=',')
-        # traj_freq = 1 ## every 1 time step(s), the goal is set to the next point in the traj
+        traj_freq = 2 ## every 1 time step(s), the goal is set to the next point in the traj
 
     import tensorflow as tf
     with tf.Session() as sess:
@@ -48,8 +49,8 @@ def test_rollout(
         params = joblib.load(param_file)
         goals = None
         goals = np.array([1. ,1. ,2. ,1. ,1 , 2.5 ])
-        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.05, goal_dist=0.5, rew_type="all_goal_positive", manual_goals=goals)
-        #env = params['env'].env
+        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.05, max_goal_dist=5, min_goal_dist=0.2, rew_type="simplified_epsilon", manual_goals=goals)
+        # env = params['env'].env
         policy = params['policy']
         
         ## modify the environment
@@ -298,6 +299,12 @@ def main(argv):
         action='store_true',
         help='use virtual display, render won\'t show'
     )
+
+    parser.add_argument(
+        '--wait_for_reached',
+        action='store_true',
+        help='should the script wait for the quad to reach a point before moving to the next one'
+    )
     args = parser.parse_args()
 
     if args.nodisp:
@@ -308,7 +315,8 @@ def main(argv):
     print('Running test rollout...')
     test_rollout(
         args.param_file, 
-        traj_file=args.traj, 
+        traj_file=args.traj,
+        wait_for_reached=args.wait_for_reached,
         render=args.render, 
         rollouts_num=args.rollouts_num,
         dt=args.dt,
