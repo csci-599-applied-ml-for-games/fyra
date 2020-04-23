@@ -9,14 +9,13 @@ import time
 
 def test_rollout(
         param_file, 
-        traj_file=None,
-        wait_for_reached=False,
+        traj_file=None, 
         render=False, 
         rollouts_num=1,
         dt=0.005,
         sim_steps=2,
         ep_time=7.0,
-        render_each=1,
+        render_each=2,
         use_noise=False, # if it's true, use what the env already has
         random_init=False,  # if it's true, use what the env already has
         random_quad=False,  # if it's true, use what the env already has
@@ -32,7 +31,7 @@ def test_rollout(
     from quad_sim.quad_models import crazyflie_params
     from quad_sim.quadrotor import QuadrotorEnv
     from quad_sim.quadrotor_randomization import R2quat
-    from quad_gen.utils import rpy2R, R2rpy
+    from simulators_investigation.utils import rpy2R, R2rpy
     import tqdm
 
 
@@ -41,17 +40,19 @@ def test_rollout(
     if traj_file != None:
         print("Reading trajectory...")
         traj = np.loadtxt(traj_file, delimiter=',')
-        traj_freq = 2 ## every 1 time step(s), the goal is set to the next point in the traj
+        num_goals_render = 32
+        render_goals = np.array(traj[0:num_goals_render]).flatten()
+        # traj_freq = 1 ## every 1 time step(s), the goal is set to the next point in the traj
 
     import tensorflow as tf
     with tf.Session() as sess:
         print("extrating parameters from file %s ..." % param_file)
         params = joblib.load(param_file)
-        goals = None
-        goals = np.array([1. ,1. ,2. ,1. ,1 , 2.5 ])
-        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.05, max_goal_dist=5, min_goal_dist=0.2, rew_type="simplified_epsilon", manual_goals=goals)
-        # env = params['env'].env
+
+        # env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.1, rew_type="epsilon")
+        env = params['env'].env
         policy = params['policy']
+        num_goals = params['env'].num_goals
         
         ## modify the environment
         if not use_noise:
@@ -60,7 +61,7 @@ def test_rollout(
         if not random_init:
             ## set init random state to False
             env.init_random_state = False
-            init_pos = np.array([0, 0, 1])
+            init_pos = np.array([0, 0, 0.05])
             init_vel = np.array([0, 0, 0])
             init_rot = rpy2R(0, 0, 0) # np.eye(3) 
             init_omega = np.array([0, 0, 0])
@@ -85,12 +86,13 @@ def test_rollout(
         
         ## Diagnostics
         observations = []
+        traj_ptr = 0
         for rollouts_id in tqdm.tqdm(range(rollouts_num)):
             s = env.reset()
             policy.reset()
             
             ## reset the goal to x:0, y:0 z:0
-            # env.goal = np.array([0., 0., 1, 0., 0., 2])
+            # env.goal = np.array([0., 0., 1])
             
             dynamics = env.dynamics
             print("thrust to weight ratio set to: {}, and max thrust is {}".format(dynamics.thrust_to_weight, dynamics.thrust_max))
@@ -104,28 +106,31 @@ def test_rollout(
                  
 
             t = 0
-            traj = True
             done = False
             while True:
                 # =================================
                 if render and (t % render_each == 0): env.render()
 
-                if traj:
-                # if traj_ptr < traj.shape[0]:
-                    # if t % traj_freq == 0:
-                    #    env.goal = traj[traj_ptr][:3]
-                    #    traj_ptr += 5   ## need to adjust this parameter according to the trajectory file frequency
+                if traj_file != None:
+                    env.goal = np.array([traj[i] for i in range(traj_ptr, traj_ptr + num_goals)]).flatten()
                     state = env.state_vector(env)
-                    reached = state[-1]
+                    reached = state[-1 * num_goals]
+                    done = state[-1]
                     
-                    if t * dt >= ep_time:
-                        # update goal
-                        done = True
+                    if reached:
+                        if traj_ptr < (traj.shape[0] - num_goals):
+                            traj_ptr += 1
+                            env.reached = np.zeros(num_goals)
+                            reached = False
+                            print(env.goal)
+                    
+                    # if t * dt >= ep_time:
+                    #     # update goal
+                    #     done = True
 
                     action = policy.get_action(s)[1]['mean']
                     s, r, _, info = env.step(action)
-                    # else:
-                    #     done = True
+
                 elif excite and t % 1000 == 0:
                     ## change the goal every 100 time step
                     env.goal = np.concatenate([
@@ -299,12 +304,6 @@ def main(argv):
         action='store_true',
         help='use virtual display, render won\'t show'
     )
-
-    parser.add_argument(
-        '--wait_for_reached',
-        action='store_true',
-        help='should the script wait for the quad to reach a point before moving to the next one'
-    )
     args = parser.parse_args()
 
     if args.nodisp:
@@ -315,8 +314,7 @@ def main(argv):
     print('Running test rollout...')
     test_rollout(
         args.param_file, 
-        traj_file=args.traj,
-        wait_for_reached=args.wait_for_reached,
+        traj_file=args.traj, 
         render=args.render, 
         rollouts_num=args.rollouts_num,
         dt=args.dt,
