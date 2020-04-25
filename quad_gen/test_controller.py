@@ -51,10 +51,11 @@ def test_rollout(
         print("extrating parameters from file %s ..." % param_file)
         params = joblib.load(param_file)
 
-        # env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.1, rew_type="epsilon")
-        env = params['env'].env
+        env = QuadrotorEnv(num_goals=2, obs_repr="nxyz_vxyz_R_omega_reached", goal_tolerance=0.1, rew_type="default", traj=render_goals)
+        #env = QuadrotorEnv(num_goals=2, obs_repr=)
+
         policy = params['policy']
-        num_goals = params['env'].num_goals
+        num_goals = 2 #params['env'].num_goals
         
         ## modify the environment
         if not use_noise:
@@ -103,7 +104,10 @@ def test_rollout(
             if not random_init:
                 dynamics.set_state(init_pos, init_vel, init_rot, init_omega)
                 dynamics.reset()
-                env.scene.reset(env.goal, dynamics)
+                if traj_file is not None:
+                    env.scene.reset(env.traj, dynamics)
+                else:
+                    env.scene.reset(env.goal, dynamics)
                 s = env.state_vector(env)
                  
             times_traj_completed = 0
@@ -115,11 +119,13 @@ def test_rollout(
 
                 if traj_file != None:
                     env.goal = np.array([traj[i % len(traj)] for i in range(traj_ptr, traj_ptr + num_goals)]).flatten()
-                    
+                    if env.curr_goal == num_goals_render:
+                        env.curr_goal = 0
+                        env.scene.recolor_goals()
                     # if t * dt >= ep_time:
                     #     # update goal
                     #     done = True
-
+                    
                     action = policy.get_action(s)[1]['mean']
                     s, r, _, info = env.step(action)
 

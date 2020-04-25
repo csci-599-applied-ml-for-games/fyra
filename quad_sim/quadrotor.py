@@ -870,7 +870,7 @@ class QuadrotorEnv(gym.Env, Serializable):
                 raw_control=True, raw_control_zero_middle=True, dim_mode='3D', tf_control=False, sim_freq=200., sim_steps=2,
                 obs_repr="xyz_vxyz_R_omega", num_goals=1, min_goal_dist=0.2, max_goal_dist=5, goal_tolerance=0.05, ep_time=4, obstacles_num=0, room_size=10, init_random_state=False, 
                 rew_type="default", rew_coeff=None, sense_noise=None, verbose=False, gravity=GRAV, resample_goal=False, 
-                t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False, manual_goals=None):
+                t2w_std=0.005, t2t_std=0.0005, excite=False, dynamics_simplification=False, manual_goals=None, traj=None):
         np.seterr(under='ignore')
         """
         Args:
@@ -921,6 +921,8 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.num_goals = num_goals
         self.rew_type = rew_type
         self.manual_goals = manual_goals
+        self.traj = traj
+        self.curr_goal = 0
 
         self.min_goal_dist = min_goal_dist
         self.max_goal_dist = max_goal_dist
@@ -1138,7 +1140,6 @@ class QuadrotorEnv(gym.Env, Serializable):
         ################################################################################
         ## STATE VECTOR FUNCTION
         self.state_vector = getattr(get_state, "state_" + self.obs_repr)
-
     
     def sample_goal_at_dist(self, point):
         assert len(point) == 3
@@ -1264,6 +1265,8 @@ class QuadrotorEnv(gym.Env, Serializable):
                 # if all previous flags are true and current flag is false
                 if np.prod(self.reached[:i]) and not self.reached[i]:
                     self.reached[i] = np.linalg.norm(self.dynamics.pos - get_goal_at(i, self.goal)) <= self.goal_tolerance
+                    if self.reached[i]:
+                        self.curr_goal+=1
                     # compute time it took to reach goal i
                     if self.time_to_goal is not None:
                         self.time_to_goal[i] = self.tick
@@ -1424,7 +1427,11 @@ class QuadrotorEnv(gym.Env, Serializable):
         self.dynamics.reset()
 
         # Resetting scene to reflect the state we have just set in dynamics
-        self.scene.reset(self.goal, self.dynamics)
+        if self.traj is not None:
+            print(self.traj)
+            self.scene.reset(self.traj, self.dynamics)
+        else:
+            self.scene.reset(self.goal, self.dynamics)
         # self.scene.update_state(self.dynamics)
 
         # Reseting some internal state (counters, etc)
@@ -1437,6 +1444,12 @@ class QuadrotorEnv(gym.Env, Serializable):
         return state
 
     def _render(self, mode='human', close=False):
+        if self.traj is not None:
+            _reached = np.ones(self.curr_goal)
+            not_reached = np.zeros(len(self.traj) - self.curr_goal)
+            _reached = np.concatenate((_reached, not_reached))
+    
+            return self.scene.render_chase(dynamics=self.dynamics, goals=self.traj, mode=mode, reached=_reached)
         return self.scene.render_chase(dynamics=self.dynamics, goals=self.goal, mode=mode, reached=self.reached)
     
     def reset(self):
