@@ -206,8 +206,8 @@ class Quadrotor3DScene(object):
         self.goal_arrows[goal_index*3 + 1].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[1]))
         self.goal_arrows[goal_index*3 + 2].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[2]))
 
-    def update_goal_color(self, goal, goal_index):
-        self.goal_transforms[goal_index].children[0].set_rgb(28.0/255.0, 235.0/255.0, 63.0/255.0)
+    def update_goal_color(self, goal_index, rgb):
+        self.goal_transforms[goal_index].children[0].set_rgb(rgb[0], rgb[1], rgb[2])
 
     def update_model(self, model):
         self.model = model
@@ -303,11 +303,15 @@ class Quadrotor3DScene(object):
         assert(len(goal) % 3 == 0)
         # self.curr_goal = 0
         self.goal_count = len(goal) // 3
+        self.curr_goal = 0
         self.chase_cam.reset(goal[0:3], dynamics.pos, dynamics.vel)
         
         reached = np.zeros(len(goal))
         self.update_state(dynamics, goal, reached)
-        
+    
+    def recolor_goals(self):
+        for i in range(self.goal_count):
+                self.update_goal_color(goal_index=i, rgb=(0.85, 0.55, 0))
     
     def update_state(self, dynamics, goals, reached=None):
         if self.scene:
@@ -319,7 +323,7 @@ class Quadrotor3DScene(object):
                 self.update_goal(goal=goals[i*3:i*3+3],goal_index = i)
                 
                 if reached is not None and reached[i]: # change to green
-                    self.update_goal_color(goal=goals[i*3:i*3+3], goal_index = i)
+                    self.update_goal_color(goal_index = i, rgb=(28./255.0, 235./255.0, 63/255.0))
 
             matrix = r3d.trans_and_rot(dynamics.pos, dynamics.rot)
             self.quad_transform.set_transform_nocollide(matrix)
