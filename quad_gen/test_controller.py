@@ -5,11 +5,13 @@ import numpy as np
 import joblib
 import os
 import time
+import csv
 
 
 def test_rollout(
         param_file, 
-        traj_file=None, 
+        traj_file=None,
+        repeat_traj=1,
         render=False, 
         rollouts_num=1,
         dt=0.005,
@@ -34,7 +36,7 @@ def test_rollout(
     from simulators_investigation.utils import rpy2R, R2rpy
     import tqdm
 
-
+    quad_traj = []
 
 
     if traj_file != None:
@@ -104,7 +106,7 @@ def test_rollout(
                 env.scene.reset(env.goal, dynamics)
                 s = env.state_vector(env)
                  
-
+            times_traj_completed = 0
             t = 0
             done = False
             while True:
@@ -112,17 +114,7 @@ def test_rollout(
                 if render and (t % render_each == 0): env.render()
 
                 if traj_file != None:
-                    env.goal = np.array([traj[i] for i in range(traj_ptr, traj_ptr + num_goals)]).flatten()
-                    state = env.state_vector(env)
-                    reached = state[-1 * num_goals]
-                    done = state[-1]
-                    
-                    if reached:
-                        if traj_ptr < (traj.shape[0] - num_goals):
-                            traj_ptr += 1
-                            env.reached = np.zeros(num_goals)
-                            reached = False
-                            print(env.goal)
+                    env.goal = np.array([traj[i % len(traj)] for i in range(traj_ptr, traj_ptr + num_goals)]).flatten()
                     
                     # if t * dt >= ep_time:
                     #     # update goal
@@ -130,6 +122,24 @@ def test_rollout(
 
                     action = policy.get_action(s)[1]['mean']
                     s, r, _, info = env.step(action)
+
+                    state = env.state_vector(env)
+                    reached_one_goal = state[-1 * num_goals]
+                    done = state[-1]
+
+                    if done:
+                        print("Here")
+                        times_traj_completed += 1
+                        if times_traj_completed < repeat_traj:
+                            done = False
+
+                    if reached_one_goal:
+                        if traj_ptr < (repeat_traj * traj.shape[0] - num_goals):
+                            traj_ptr += 1
+                            env.reached = np.zeros(num_goals)
+                            reached_one_goal = False
+
+                    quad_traj.append(env.dynamics.pos)
 
                 elif excite and t % 1000 == 0:
                     ## change the goal every 100 time step
@@ -162,7 +172,8 @@ def test_rollout(
                 real_pos = np.concatenate([[t * dt * sim_steps], 
                     pos, rpy, vel, omega, env.goal, action])
                 observations.append(real_pos)
-                
+        
+        save_traj_to_csv(quad_traj, traj_file.split('/')[-1][:-4])
 
         if save == True:
             save_path = './test_tmp/'
@@ -210,6 +221,12 @@ def test_rollout(
         
 
     print("##############################################################")
+
+def save_traj_to_csv(traj, file_name):
+    with open(file_name + '_quad_traj.csv', 'w') as csvfile:
+        traj_file = csv.writer(csvfile)
+        for pos in traj:
+            traj_file.writerow(pos)
 
 
 def main(argv):
@@ -304,6 +321,13 @@ def main(argv):
         action='store_true',
         help='use virtual display, render won\'t show'
     )
+
+    parser.add_argument(
+        '-repeat_traj',
+        type=int,
+        default=1,
+        help='number of times to repeat the trajectory'
+    )
     args = parser.parse_args()
 
     if args.nodisp:
@@ -314,7 +338,8 @@ def main(argv):
     print('Running test rollout...')
     test_rollout(
         args.param_file, 
-        traj_file=args.traj, 
+        traj_file=args.traj,
+        repeat_traj=args.repeat_traj,
         render=args.render, 
         rollouts_num=args.rollouts_num,
         dt=args.dt,
