@@ -33,7 +33,7 @@ def test_rollout(
     from quad_sim.quad_models import crazyflie_params
     from quad_sim.quadrotor import QuadrotorEnv
     from quad_sim.quadrotor_randomization import R2quat
-    from simulators_investigation.utils import rpy2R, R2rpy
+    from quad_gen.utils import rpy2R, R2rpy
     import tqdm
 
     quad_traj = []
