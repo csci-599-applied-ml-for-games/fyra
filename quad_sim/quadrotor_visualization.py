@@ -207,7 +207,8 @@ class Quadrotor3DScene(object):
         self.goal_arrows[goal_index*3 + 2].set_transform(r3d.trans_and_rot(goal[0:3], self.goal_arrows_rot[2]))
 
     def update_goal_color(self, goal_index, rgb):
-        self.goal_transforms[goal_index].children[0].set_rgb(rgb[0], rgb[1], rgb[2])
+        if goal_index < len(self.goal_transforms) - 1 and len(self.goal_transforms[goal_index].children) > 0:
+            self.goal_transforms[goal_index].children[0].set_rgb(rgb[0], rgb[1], rgb[2])
 
     def update_model(self, model):
         self.model = model
