@@ -134,7 +134,6 @@ def test_rollout(
                     done = state[-1]
 
                     if done:
-                        print("Here")
                         times_traj_completed += 1
                         if times_traj_completed < repeat_traj:
                             done = False
