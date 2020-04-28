@@ -17,7 +17,7 @@ def test_rollout(
         dt=0.005,
         sim_steps=2,
         ep_time=7.0,
-        render_each=2,
+        render_each=3,
         use_noise=False, # if it's true, use what the env already has
         random_init=False,  # if it's true, use what the env already has
         random_quad=False,  # if it's true, use what the env already has
@@ -28,7 +28,7 @@ def test_rollout(
     ):
 
     # moved these here so that pyvirtualdisplay is imported before them
-    
+
     from quad_sim.quad_utils import R2quat
     from quad_sim.quad_models import crazyflie_params
     from quad_sim.quadrotor import QuadrotorEnv
